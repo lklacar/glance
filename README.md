@@ -83,6 +83,8 @@ Drag `dist/Glance.app` into **Applications** to keep it installed. If you alread
 
 Open an image with **⌘O**, drop an image or folder onto Glance, or choose **Open With → Glance** in Finder. Press **← / →** to browse and scroll to zoom.
 
+Right-click the image (or Control-click) for navigation, zoom, rotation, full screen, slideshow, copy, Finder, and image information actions. Animated images also offer pause/resume. Checkmarks show the active zoom mode, and unavailable actions are disabled.
+
 Images are sorted as Finder sorts filenames: `photo2` comes before `photo10`. Browsing stays within the current folder and excludes subfolders and hidden files. An explicitly opened hidden or extensionless image can still be displayed.
 
 Use **File → Open Recent** to return to a recent image. Closing the window keeps Glance in the Dock; **⌘Q** quits.
@@ -116,6 +118,7 @@ Repeat for each format you want Glance to open by default. Use **Change All…**
 | Reveal file in Finder | **⇧⌘R** |
 | Copy image file | **⌘C** |
 | Open image or folder | **⌘O** |
+| Image context menu | Right-click or **Control-click** |
 
 ## Supported formats
 
@@ -138,7 +141,7 @@ Very large raster images are downsampled to approximately **48 megapixels**, wit
 
 Zoom and pan update Core Animation layers without repainting the decoded image for every input event. Wheel ticks and zoom buttons use short, display-synchronized transitions. Precise trackpad scrolling and pinch respond directly; Reduce Motion disables the added transitions.
 
-A separate background queue preloads up to three images before and after the current image. The cache favors nearby images within a **256 MiB budget** for accounted decoded pixels and source-file sizes. Decoder overhead and animation frames use additional memory, so this is not a total process-memory limit. Large images or rapid navigation can still require a load.
+A separate background queue preloads up to three images before and after the current image. The cache favors nearby images within a budget of **one-sixteenth of the Mac's RAM, bounded between 256 MiB and 1 GiB**, for accounted decoded pixels and source-file sizes. This keeps large neighboring photos resident on Macs with enough RAM. When macOS reports memory pressure, Glance releases cached images and suspends preloading until pressure subsides, preserving the displayed image. Decoder overhead and animation frames use additional memory, so the cache budget is not a total process-memory limit. Large images or rapid navigation can still require a load.
 
 Cached files are checked for edits, replacement, and removal before reuse. An uncached navigation retains the previous frame until the next one is ready. GIF, APNG, and WebP frames decode sequentially, and animation pauses when the window is minimized.
 

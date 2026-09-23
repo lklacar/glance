@@ -32,7 +32,14 @@ public final class ImageCache {
     private var entries: [URL: Entry] = [:]
     private var priority: [URL] = []
 
-    public init(byteLimit: Int = 256 * 1024 * 1024) { self.byteLimit = max(0, byteLimit) }
+    /// Keep large neighboring photos resident without taking an unbounded share of RAM.
+    public static func recommendedByteLimit(physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory) -> Int {
+        let minimum: UInt64 = 256 * 1_048_576
+        let maximum: UInt64 = 1024 * 1_048_576
+        return Int(min(maximum, max(minimum, physicalMemory / 16)))
+    }
+
+    public init(byteLimit: Int = ImageCache.recommendedByteLimit()) { self.byteLimit = max(0, byteLimit) }
 
     /// Current image first, then nearby images in decreasing priority.
     public func setPriority(_ urls: [URL]) {

@@ -90,3 +90,13 @@ All 24 core check groups and the window/controller rendering checks pass after t
 ## Finder default-opening repair
 
 The affected downloaded JPEG had both `com.apple.quarantine` and a `com.apple.LaunchServices.OpenWith` override pointing to `/Applications/Glance.app`; the format-wide JPEG default was still Preview. This matches Apple's documented quarantined-document/per-file-binding warning. Set the JPEG default to `rs.qubit.glance` and removed only that file's Open With override. Opening through the system default then displayed the affected 5911 × 3941 image in Glance, verified through the native window's accessibility state. The quarantine attribute was preserved. This required no app-code or signing change.
+
+## Image context menu and large-photo caching
+
+All 25 core check groups and the window/controller checks pass. The context menu reuses the existing image actions and is available only when an image is ready. Checks exercise menu action dispatch, zoom-mode checkmarks, rotation, navigation, slideshow state, animation pause/resume, and disabled actions in a single-image folder. Explicit opens and folder scans now normalize paths consistently, preventing duplicate entries when a folder is reached through a symlink.
+
+The universal release build passes bundle verification and was installed at `/Applications/Glance.app`. A native right-click on a displayed image was verified to expose the new context menu in the running app.
+
+Profiling a folder of four local photos reproduced cache thrashing: an approximately 170 MiB decoded neighbor was evicted under the old 256 MiB budget and decoded again on navigation. The cache now uses one-sixteenth of physical RAM, with a 256 MiB floor and 1 GiB ceiling. A three-large-JPEG regression fixture exceeds the old budget and verifies that navigation retains all three under the 512 MiB budget used for an 8 GiB Mac. Memory-pressure checks verify cache release without clearing the displayed frame and resumption of preloading after pressure subsides.
+
+In the local four-photo comparison, repeated uncached switches took approximately 289–633 ms. With the revised budget, all measured switches hit the cache; after first presentation, repeated switches took approximately 11–14 ms. The first presentation of a cached large image still took up to 148 ms. These harness timings include main-thread navigation and a Core Animation flush, not a measurement of physical display latency or GPU frame time.

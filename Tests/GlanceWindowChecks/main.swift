@@ -28,7 +28,7 @@ func writeImage(_ url: URL, width: Int, height: Int) throws {
     CGImageDestinationAddImage(destination, context.makeImage()!, nil)
     check(CGImageDestinationFinalize(destination), "Write image fixture")
 }
-let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+let folder = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 defer { try? FileManager.default.removeItem(at: folder) }
 let first = folder.appendingPathComponent("1.png")
@@ -37,8 +37,12 @@ let replacement = folder.appendingPathComponent("replacement.dat")
 try writeImage(first, width: 400, height: 200)
 try writeImage(second, width: 800, height: 400)
 let viewer = ViewerWindowController()
+let contextClick = NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+    windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+check(viewer.canvas.menu(for: contextClick) == nil, "No image context menu on the empty canvas")
 viewer.open(first, showWindow: false)
 check(viewer.canvas.isLoading, "Initial load uses a loading state, not the welcome screen")
+check(viewer.canvas.menu(for: contextClick) == nil, "No stale image actions while loading")
 viewer.open(first, showWindow: false) // Duplicate while the decoder is still running.
 waitFor("First image appears") { viewer.canvas.image != nil && !viewer.canvas.isLoading }
 let originalFrame = viewer.canvas.image
@@ -59,6 +63,33 @@ check(viewer.canvas.image === originalFrame, "Duplicate open does not schedule a
 check(viewer.canvas.viewport.scale == originalScale, "Duplicate open preserves zoom")
 print("Checked metadata-only events and duplicate opens do not redisplay images")
 
+func performContextAction(_ title: String, in controller: ViewerWindowController) {
+    guard let menu = controller.canvas.menu(for: contextClick), let item = menu.item(withTitle: title) else {
+        check(false, "Context action exists: \(title)"); return
+    }
+    check(item.target === controller && item.isEnabled, "Context action targets the image's controller: \(title)")
+    menu.performActionForItem(at: menu.index(of: item))
+}
+performContextAction("Fit to Window", in: viewer)
+check(viewer.canvas.viewport.fitsWindow, "Context-menu fit action works")
+check(viewer.imageContextMenu()?.item(withTitle: "Fit to Window")?.state == .on, "Fit menu item reflects current zoom mode")
+performContextAction("Actual Pixels", in: viewer)
+check(!viewer.canvas.viewport.fitsWindow && viewer.canvas.viewport.scale == viewer.canvas.viewport.nativeScale, "Context-menu actual pixels respects Retina scale")
+check(viewer.imageContextMenu()?.item(withTitle: "Actual Pixels")?.state == .on, "Actual pixels menu item reflects current zoom mode")
+performContextAction("Rotate Clockwise", in: viewer)
+check(viewer.canvas.quarterTurns == 1 && viewer.canvas.viewport.imageSize.width == 200, "Context-menu rotation works")
+for _ in 0..<3 { viewer.rotate(nil) }
+performContextAction("Start Slideshow", in: viewer)
+check(viewer.imageContextMenu()?.item(withTitle: "Stop Slideshow") != nil, "Context menu reflects active slideshow")
+performContextAction("Stop Slideshow", in: viewer)
+check(viewer.imageContextMenu()?.item(withTitle: "Pause Animation") == nil, "Still images omit animation controls")
+performContextAction("Next Image", in: viewer)
+check(viewer.canvas.viewport.imageSize.width == 800, "Context-menu next action navigates")
+check(viewer.catalog.current == second.standardizedFileURL.resolvingSymlinksInPath(), "Context-menu navigation selects the expected file")
+performContextAction("Previous Image", in: viewer)
+check(viewer.catalog.current == first, "Context-menu previous action navigates")
+print("Checked context-menu routing, zoom modes, rotation, navigation, and slideshow state")
+
 viewer.navigate(1)
 check(viewer.canvas.image !== originalFrame && !viewer.canvas.isLoading, "Prefetched next image displays synchronously")
 check(viewer.canvas.viewport.imageSize.width == 800, "Next image is correct")
@@ -72,6 +103,18 @@ waitFor("Cold open completes", whileWaiting: { if viewer.canvas.image == nil { b
 }
 check(blankFrames == 0, "No empty state during cold navigation")
 print("Checked warm navigation and no blank frame during cold loads")
+
+let beforePressure = viewer.canvas.image
+viewer.handleMemoryPressure(.critical)
+check(viewer.canvas.image === beforePressure, "Memory pressure preserves the displayed image")
+viewer.navigate(1)
+check(viewer.canvas.isLoading, "Memory pressure releases cached neighbors")
+waitFor("Navigation still loads while memory is constrained") { !viewer.canvas.isLoading }
+viewer.handleMemoryPressure(.normal)
+RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+viewer.navigate(-1)
+check(!viewer.canvas.isLoading && viewer.catalog.current == first, "Neighbor preloading resumes after memory pressure")
+print("Checked memory-pressure cache release and prefetch recovery")
 
 let oldFrame = viewer.canvas.image
 try writeImage(replacement, width: 600, height: 300)
@@ -98,6 +141,30 @@ waitFor("Corrupt replacement reports an error") {
 }
 viewer.close()
 print("Checked failed replacements report a real error")
+check(viewer.canvas.menu(for: contextClick) == nil, "Closed/error canvas has no image menu")
+let singleFolder = folder.appendingPathComponent("single")
+try FileManager.default.createDirectory(at: singleFolder, withIntermediateDirectories: true)
+let animated = singleFolder.appendingPathComponent("animated.gif")
+let fixtureFolder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Fixtures")
+try FileManager.default.copyItem(at: fixtureFolder.appendingPathComponent("animated.gif"), to: animated)
+let animatedViewer = ViewerWindowController()
+let linkedFolder = folder.appendingPathComponent("linked-single")
+try FileManager.default.createSymbolicLink(at: linkedFolder, withDestinationURL: singleFolder)
+animatedViewer.open(linkedFolder.appendingPathComponent("animated.gif"), showWindow: false)
+waitFor("Animated context-menu fixture loads") { animatedViewer.canvas.image != nil && !animatedViewer.canvas.isLoading }
+RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+check(animatedViewer.catalog.urls == [animated.standardizedFileURL.resolvingSymlinksInPath()], "Opening through a directory symlink does not duplicate the image")
+let singleMenu = animatedViewer.imageContextMenu()
+singleMenu?.update()
+check(singleMenu?.item(withTitle: "Next Image")?.isEnabled == false, "Single image disables next")
+check(singleMenu?.item(withTitle: "Previous Image")?.isEnabled == false, "Single image disables previous")
+check(singleMenu?.item(withTitle: "Start Slideshow")?.isEnabled == false, "Single image disables slideshow")
+performContextAction("Pause Animation", in: animatedViewer)
+check(animatedViewer.imageContextMenu()?.item(withTitle: "Resume Animation") != nil, "Paused animation offers resume")
+performContextAction("Resume Animation", in: animatedViewer)
+check(animatedViewer.imageContextMenu()?.item(withTitle: "Pause Animation") != nil, "Resumed animation offers pause")
+animatedViewer.close()
+print("Checked single-image menu validation and animation playback actions")
 // Layer rendering must match the old CGContext path, including orientation and rotation.
 let sampleURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Fixtures/still.ppm")
 let sample = try ImageDecoder.load(sampleURL)

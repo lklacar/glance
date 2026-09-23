@@ -198,6 +198,34 @@ final class GlanceCoreTests {
         tiny.insert(images[0], for: urls[0], version: try unwrap(ImageFileVersion(url: urls[0])))
         expectEqual(tiny.count, 0)
     }
+    func testCacheKeepsLargeNeighborsWithinMemoryBudget() throws {
+        let mib = 1024 * 1024
+        expectEqual(ImageCache.recommendedByteLimit(physicalMemory: 4 * 1024 * 1024 * 1024), 256 * mib)
+        expectEqual(ImageCache.recommendedByteLimit(physicalMemory: 8 * 1024 * 1024 * 1024), 512 * mib)
+        expectEqual(ImageCache.recommendedByteLimit(physicalMemory: 64 * 1024 * 1024 * 1024), 1024 * mib)
+        let sizes = [(5000, 4000), (8000, 5500), (5500, 4000)]
+        let urls = sizes.indices.map { file("large\($0).jpg") }
+        let cache = ImageCache(byteLimit: ImageCache.recommendedByteLimit(physicalMemory: 8 * 1024 * 1024 * 1024))
+        cache.setPriority(urls)
+        for index in sizes.indices {
+            try autoreleasepool {
+                let destination = try unwrap(CGImageDestinationCreateWithURL(urls[index] as CFURL, "public.jpeg" as CFString, 1, nil))
+                CGImageDestinationAddImage(destination, image(width: sizes[index].0, height: sizes[index].1), nil)
+                expectTrue(CGImageDestinationFinalize(destination))
+                let decoded = try ImageDecoder.load(urls[index])
+                cache.insert(decoded, for: urls[index], version: try unwrap(ImageFileVersion(url: urls[index])))
+            }
+        }
+        expectTrue(cache.totalCost > 256 * mib, "Regression fixture exceeds the old cache budget")
+        expectTrue(cache.totalCost <= cache.byteLimit)
+        for _ in 0..<3 {
+            for index in [1, 0, 2, 0] {
+                cache.setPriority([urls[index]] + urls.filter { $0 != urls[index] })
+                expectNotNil(cache.image(for: urls[index]))
+            }
+        }
+        expectEqual(cache.count, 3, "Large current, next, and previous images stay cached")
+    }
     func testCacheRejectsEditedReplacedAndRemovedFiles() throws {
         let url = try write("image.png"), decoded = try ImageDecoder.load(url)
         let cache = ImageCache(); cache.setPriority([url])
@@ -365,5 +393,6 @@ suite.testSmoothZoomRefreshRatesReversalAndCancellation()
 print("Checked testSmoothZoomRefreshRatesReversalAndCancellation")
 suite.testZoomInputIsBoundedAndPrecise()
 print("Checked testZoomInputIsBoundedAndPrecise")
+do { try suite.setUpWithError(); try suite.testCacheKeepsLargeNeighborsWithinMemoryBudget(); try suite.tearDownWithError(); print("Checked testCacheKeepsLargeNeighborsWithinMemoryBudget") } catch { fail("testCacheKeepsLargeNeighborsWithinMemoryBudget: \(error)") }
 print("\(failures) failures")
 exit(failures == 0 ? 0 : 1)

@@ -27,9 +27,11 @@ public struct FolderCatalog {
     }
 
     public static func scan(_ folder: URL) throws -> [URL] {
-        try FileManager.default.contentsOfDirectory(at: folder,
+        let files = try FileManager.default.contentsOfDirectory(at: folder,
             includingPropertiesForKeys: [.isRegularFileKey, .contentTypeKey], options: [.skipsHiddenFiles])
             .filter { ImageFormats.accepts($0) && (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+            .map { $0.standardizedFileURL.resolvingSymlinksInPath() }
+        return Array(Set(files))
             .sorted {
                 let order = $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent)
                 return order == .orderedSame ? $0.path < $1.path : order == .orderedAscending

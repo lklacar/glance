@@ -39,6 +39,7 @@ final class CanvasView: NSView {
     var onZoom: (() -> Void)?
     var onTogglePlayback: (() -> Void)?
     var onEscape: (() -> Void)?
+    var onContextMenu: (() -> NSMenu?)?
     private var dragPoint: CGPoint?
     private var isDropTarget = false { didSet { updateDropBorder() } }
     override var acceptsFirstResponder: Bool { true }
@@ -224,6 +225,11 @@ final class CanvasView: NSView {
     }
     override func mouseUp(with event: NSEvent) { if dragPoint != nil { NSCursor.pop() }; dragPoint = nil }
     override func resetCursorRects() { if image != nil { addCursorRect(bounds, cursor: .openHand) } }
+    override func menu(for event: NSEvent) -> NSMenu? {
+        window?.makeFirstResponder(self)
+        stopZoomAnimation()
+        return onContextMenu?()
+    }
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 123: onNavigate?(-1)

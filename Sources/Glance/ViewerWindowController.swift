@@ -16,6 +16,8 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
     private let decodeQueue = OperationQueue()
     private let prefetchQueue = OperationQueue()
     private let imageCache = ImageCache()
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
+    private var memoryIsConstrained = false
     private var prefetchID = UUID()
     private let scanQueue = DispatchQueue(label: "rs.qubit.glance.folder", qos: .userInitiated)
     private var requestID = UUID()
@@ -50,6 +52,13 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         decodeQueue.qualityOfService = .userInitiated
         prefetchQueue.name = "rs.qubit.glance.prefetch"; prefetchQueue.maxConcurrentOperationCount = 1
         prefetchQueue.qualityOfService = .utility
+        let pressure = DispatchSource.makeMemoryPressureSource(eventMask: [.normal, .warning, .critical], queue: .main)
+        pressure.setEventHandler { [weak self] in
+            guard let self, let event = self.memoryPressureSource?.data else { return }
+            self.handleMemoryPressure(event)
+        }
+        memoryPressureSource = pressure
+        pressure.resume()
         buildContent()
         let toolbar = NSToolbar(identifier: "ViewerToolbar")
         toolbar.delegate = self; toolbar.displayMode = .iconOnly
@@ -60,6 +69,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         canvas.onNavigate = { [weak self] in self?.navigate($0) }
         canvas.onZoom = { [weak self] in self?.updateZoomIndicator() }
         canvas.onTogglePlayback = { [weak self] in self?.togglePlayback(nil) }
+        canvas.onContextMenu = { [weak self] in self?.imageContextMenu() }
         canvas.onEscape = { [weak self] in
             guard let self else { return }
             stopSlideshow()
@@ -69,6 +79,14 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         updateStatus()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    deinit { memoryPressureSource?.cancel() }
+
+    func handleMemoryPressure(_ event: DispatchSource.MemoryPressureEvent) {
+        memoryIsConstrained = !event.intersection([.warning, .critical]).isEmpty
+        if memoryIsConstrained {
+            cancelPrefetch(); imageCache.removeAll()
+        } else if !isClosed { prefetchNeighbors() }
+    }
 
     private func buildContent() {
         guard let content = window?.contentView else { return }
@@ -132,7 +150,9 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         isClosed = false
         if showWindow { self.showWindow(nil); window?.makeKeyAndOrderFront(nil); window?.makeFirstResponder(canvas) }
         stopSlideshow()
-        let url = input.standardizedFileURL
+        // Folder enumeration resolves directory aliases. Use the same canonical
+        // path for explicit opens so the current image is not appended twice.
+        let url = input.standardizedFileURL.resolvingSymlinksInPath()
         // Finder can deliver the same open request more than once during launch.
         if catalog.current == url, let version = currentVersion,
            version == ImageFileVersion(url: url), loadingURL == url || decoded != nil { return }
@@ -264,7 +284,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         cancelPrefetch()
         let neighbors = catalog.nearbyURLs()
         imageCache.setPriority(neighbors)
-        guard !isClosed, window?.isMiniaturized != true else { return }
+        guard !isClosed, !memoryIsConstrained, window?.isMiniaturized != true else { return }
         prefetchNext(Array(neighbors.dropFirst()), token: prefetchID)
     }
     private func prefetchNext(_ urls: [URL], token: UUID) {
@@ -349,6 +369,43 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         else if delta == Int.max { catalog.select(catalog.urls.count - 1) }
         else { catalog.move(delta) }
         loadCurrent()
+    }
+    func imageContextMenu() -> NSMenu? {
+        guard decoded != nil, !canvas.isLoading else { return nil }
+        let menu = NSMenu(title: "Image")
+        @discardableResult func add(_ title: String, _ symbol: String, _ action: Selector,
+                                    _ key: String = "", _ modifiers: NSEvent.ModifierFlags = .command) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.target = self; item.keyEquivalentModifierMask = modifiers
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            item.isEnabled = validateMenuItem(item)
+            menu.addItem(item)
+            return item
+        }
+        add("Previous Image", "chevron.left", #selector(previous(_:)), String(UnicodeScalar(NSLeftArrowFunctionKey)!), [])
+        add("Next Image", "chevron.right", #selector(next(_:)), String(UnicodeScalar(NSRightArrowFunctionKey)!), [])
+        menu.addItem(.separator())
+        add("Fit to Window", "arrow.down.right.and.arrow.up.left", #selector(fit(_:)), "0").state = canvas.viewport.fitsWindow ? .on : .off
+        add("Actual Pixels", "1.magnifyingglass", #selector(actualSize(_:)), "1").state =
+            !canvas.viewport.fitsWindow && abs(canvas.viewport.scale - canvas.viewport.nativeScale) < 0.0001 ? .on : .off
+        add("Zoom In", "plus.magnifyingglass", #selector(zoomIn(_:)), "+")
+        add("Zoom Out", "minus.magnifyingglass", #selector(zoomOut(_:)), "-")
+        menu.addItem(.separator())
+        add("Rotate Clockwise", "rotate.right", #selector(rotate(_:)), "r")
+        let fullScreen = window?.styleMask.contains(.fullScreen) == true
+        add(fullScreen ? "Exit Full Screen" : "Enter Full Screen", fullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+            #selector(toggleFullScreen(_:)), "f", [.command, .control])
+        if (decoded?.frameCount ?? 0) > 1 {
+            add(animationPaused ? "Resume Animation" : "Pause Animation", animationPaused ? "play" : "pause", #selector(togglePlayback(_:)), " ", [])
+        }
+        add(slideshow == nil ? "Start Slideshow" : "Stop Slideshow", slideshow == nil ? "play.rectangle" : "stop", #selector(toggleSlideshow(_:)), "p", [.command, .shift])
+        menu.addItem(.separator())
+        add("Copy Image File", "doc.on.doc", #selector(copy(_:)), "c")
+        add("Show in Finder", "folder", #selector(reveal(_:)), "r", [.command, .shift])
+        add("Image Information…", "info.circle", #selector(showInfo(_:)), "i")
+        menu.addItem(.separator())
+        add("Open Image or Folder…", "folder.badge.plus", #selector(openDocument(_:)), "o")
+        return menu
     }
     @objc func openDocument(_ sender: Any?) {
         let panel = NSOpenPanel()
