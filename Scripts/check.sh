@@ -4,3 +4,4 @@ cd "$(dirname "$0")/.."
 export CLANG_MODULE_CACHE_PATH="$PWD/.build/module-cache"
 swift run --disable-sandbox --cache-path "$PWD/.build/cache" --config-path "$PWD/.build/config" \
     --security-path "$PWD/.build/security" PhotoViewerChecks
+Scripts/check-window.sh

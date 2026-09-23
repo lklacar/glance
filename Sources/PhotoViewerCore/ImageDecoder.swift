@@ -12,7 +12,8 @@ public enum ViewerError: LocalizedError {
     }
 }
 
-/// The source is only accessed on the viewer's serial decoding queue.
+/// Loaded on a decoder queue, then handed off to the serial animation queue.
+/// Cached instances share the immutable first frame; source access stays serial.
 public final class DecodedImage {
     public let image: CGImage
     public let pixelSize: CGSize

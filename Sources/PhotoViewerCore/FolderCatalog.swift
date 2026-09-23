@@ -47,6 +47,21 @@ public struct FolderCatalog {
         self.index = index
     }
 
+    /// Nearest neighbors first, wrapping just like arrow-key navigation.
+    public func nearbyURLs(radius: Int = 3) -> [URL] {
+        guard let current else { return [] }
+        var result = [current]
+        var seen: Set<URL> = [current]
+        let steps = min(max(0, radius), urls.count - 1)
+        guard steps > 0 else { return result }
+        for distance in 1...steps {
+            for candidate in [(index + distance) % urls.count, (index - distance + urls.count) % urls.count] {
+                if seen.insert(urls[candidate]).inserted { result.append(urls[candidate]) }
+            }
+        }
+        return result
+    }
+
     public mutating func refresh(_ updated: [URL]) {
         let previous = current
         let oldIndex = index

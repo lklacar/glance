@@ -4,6 +4,7 @@ import PhotoViewerCore
 final class CanvasView: NSView {
     var viewport = Viewport()
     var image: CGImage?
+    private(set) var isLoading = false
     var quarterTurns = 0
     var message = "Drop an image here"
     var detail = "Or press ⌘O to open an image or folder"
@@ -28,12 +29,20 @@ final class CanvasView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func display(_ decoded: DecodedImage) {
+        isLoading = false
         image = decoded.image; quarterTurns = 0
         viewport.nativeScale = 1 / (window?.backingScaleFactor ?? 1)
         viewport.imageSize = decoded.pixelSize; viewport.resize(bounds.size); viewport.fit()
         message = ""; detail = ""; needsDisplay = true; window?.invalidateCursorRects(for: self); onZoom?()
     }
+    func beginLoading() {
+        // Keep the last frame until the replacement is ready; never draw the
+        // welcome/empty-state illustration between two image presentations.
+        isLoading = true; message = ""; detail = ""; needsDisplay = true
+        if image == nil { setAccessibilityValue("Loading image") }
+    }
     func showMessage(_ title: String, detail: String) {
+        isLoading = false
         image = nil; message = title; self.detail = detail; needsDisplay = true
         setAccessibilityValue(title + ". " + detail)
     }
@@ -61,7 +70,7 @@ final class CanvasView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSColor(calibratedWhite: 0.075, alpha: 1).setFill(); bounds.fill()
         guard let image, let context = NSGraphicsContext.current?.cgContext else {
-            drawWelcome(); return
+            if !isLoading { drawWelcome() }; return
         }
         let rect = viewport.rect
         context.saveGState()
@@ -120,7 +129,7 @@ final class CanvasView: NSView {
     override func magnify(with event: NSEvent) { zoom(max(0.1, 1 + event.magnification), at: convert(event.locationInWindow, from: nil)) }
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        if image == nil { onOpen?(); return }
+        if image == nil { if !isLoading { onOpen?() }; return }
         if event.clickCount == 2 { viewport.fitsWindow ? actualSize() : fit(); return }
         dragPoint = convert(event.locationInWindow, from: nil); NSCursor.closedHand.push()
     }

@@ -56,3 +56,19 @@ This record is evidence of the checks above, not a guarantee that all bugs or al
 - macOS 14 is the deployment target; this session ran on macOS 15.7.4. Test on macOS 14 and the other supported OS releases before a public release.
 - Real camera RAW samples from different camera models, JPEG XL, OpenEXR/HDR variants, and ICC color accuracy against calibrated references were not exhaustively tested. Those rely on the installed macOS decoders and documented preview behavior.
 - GitHub Actions configuration is included but has not run in this local-only session.
+
+## Surrounding-image preloading update
+
+All 19 regression check groups pass on Apple Silicon and in the optimized Intel executable under Rosetta. Five new groups verify wrapping and duplicate-free neighbor selection; byte-budget eviction that favors nearest images; invalidation after in-place edits, same-size atomic replacement, and deletion; reuse of the exact decoded image during warm navigation; and cache lookup timing.
+
+On this Mac, a synthetic 2400 × 1600 PNG took approximately 9.06 ms to decode. A warm cache lookup, including a fresh filesystem version check, averaged 0.003 ms across 1,000 lookups. These are decoder/cache timings, not an end-to-end rendering benchmark or a guarantee for every file.
+
+The window now uses cached images synchronously, preloads up to three neighbors in each direction on a separate serial background queue, and cancels outdated preload requests on navigation, folder changes, minimization, and window closure. The cache budget is 256 MiB for accounted pixel and source-file bytes; macOS decoder overhead is additional.
+
+## Repeated-open flashing fix
+
+A local filesystem trace confirmed that updating an extended attribute emits an attribute-change event without a data-write event. The previous monitor subscribed to those attribute changes and unconditionally cleared the cache/reloaded the image. The loading path also drew the empty-state illustration between decodes.
+
+The monitor now subscribes to content writes, extension, deletion, rename, and revocation, excluding attribute-only changes. Cache fingerprints ignore metadata change time while retaining inode, size, and nanosecond modification time. Repeated opens of the same unchanged image are ignored. A load retains the previous frame until the new image is ready; an initial load uses a plain loading state instead of the welcome illustration.
+
+All 21 core check groups pass locally. The added real-window-controller checks also pass without showing windows: metadata changes and duplicate opens preserve the image object and zoom; warmed navigation displays synchronously; cold loads never clear the displayed frame; atomic replacements and in-place edits reload without blank frames; corrupt replacements still report an error. `Scripts/check.sh` includes these controller checks so CI and release validation cover the regression.
