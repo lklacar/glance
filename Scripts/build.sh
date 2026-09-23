@@ -23,6 +23,7 @@ done
 lipo -create "${binaries[@]}" -output "$staging/Contents/MacOS/Glance"
 cp Resources/Info.plist "$staging/Contents/Info.plist"
 cp Resources/PrivacyInfo.xcprivacy "$staging/Contents/Resources/PrivacyInfo.xcprivacy"
+cp LICENSE "$staging/Contents/Resources/LICENSE"
 swift Scripts/make-icon.swift "$PWD/.build/AppIcon.iconset"
 iconutil -c icns "$PWD/.build/AppIcon.iconset" -o "$staging/Contents/Resources/AppIcon.icns"
 plutil -lint "$staging/Contents/Info.plist" "$staging/Contents/Resources/PrivacyInfo.xcprivacy"

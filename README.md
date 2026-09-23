@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <strong>A native macOS image viewer, inspired by Eye of GNOME.</strong><br />
+  <strong>A native macOS image viewer, inspired by Eye of GNOME and the classic Windows Photo Viewer.</strong><br />
   Open an image. Scroll to zoom. Use the arrow keys to explore its folder.
 </p>
 
@@ -46,6 +46,10 @@
 </p>
 
 ---
+
+I couldn't find a good fucking photo viewer for macOS, so I built one.
+
+Glance takes its cues from **Eye of GNOME** and the **old-school Windows Photo Viewer**: open an image, scroll to zoom, and use the arrow keys to move through its folder. Simple, familiar, and fast.
 
 Glance opens images directly from your folders. There is no library to import, account to create, or catalog to maintain.
 
@@ -215,4 +219,6 @@ For code changes, keep the scope focused and run `Scripts/check.sh` before submi
 
 ## License
 
-No license has been added to this repository yet.
+Glance is licensed under the [MIT License](LICENSE).
+
+Copyright © 2026 [Luka Klacar](https://github.com/lklacar). Copies or substantial portions of the software must retain this copyright notice and the MIT license notice, including when modified or redistributed commercially. The license is also included in the app bundle.
