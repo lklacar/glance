@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import ImageIO
 import PhotoViewerCore
 import Darwin
@@ -97,5 +98,50 @@ waitFor("Corrupt replacement reports an error") {
 }
 viewer.close()
 print("Checked failed replacements report a real error")
+// Layer rendering must match the old CGContext path, including orientation and rotation.
+let sampleURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Fixtures/still.ppm")
+let sample = try ImageDecoder.load(sampleURL)
+let canvas = CanvasView(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+canvas.display(sample)
+canvas.zoom(3)
+func bitmap() -> CGContext {
+    CGContext(data: nil, width: 400, height: 300, bitsPerComponent: 8, bytesPerRow: 1600,
+              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+}
+for turn in 0..<4 {
+    let actual = bitmap(), reference = bitmap()
+    canvas.layer!.render(in: actual)
+    let rect = canvas.viewport.rect
+    reference.translateBy(x: rect.midX, y: rect.midY)
+    reference.rotate(by: -CGFloat(turn) * .pi / 2)
+    let size = turn % 2 == 1 ? CGSize(width: rect.height, height: rect.width) : rect.size
+    reference.draw(sample.image, in: CGRect(x: -size.width / 2, y: -size.height / 2, width: size.width, height: size.height))
+    let a = actual.data!.assumingMemoryBound(to: UInt8.self), r = reference.data!.assumingMemoryBound(to: UInt8.self)
+    for xRatio in [0.25, 0.75] {
+        for yRatio in [0.25, 0.75] {
+            let x = Int(rect.minX + rect.width * xRatio), y = Int(rect.minY + rect.height * yRatio)
+            let offset = y * 1600 + x * 4
+            for component in 0..<4 {
+                check(abs(Int(a[offset + component]) - Int(r[offset + component])) <= 2,
+                      "Layer pixels match reference at rotation \(turn), sample \(x),\(y), component \(component): \(a[offset + component]) vs \(r[offset + component])")
+            }
+        }
+    }
+    canvas.rotate(); canvas.zoom(3)
+}
+print("Checked composited image orientation and all four rotations")
+canvas.fit(); canvas.needsDisplay = false
+let retainedContents = canvas.imageLayer.contents as AnyObject?
+let checker = canvas.layer?.sublayers?.first { $0.name == "Transparency" }?.sublayers?.first as? CAShapeLayer
+let retainedChecker = checker?.path
+let start = Date()
+for index in 0..<1000 { canvas.zoom(index % 2 == 0 ? 1.01 : 1 / 1.01) }
+let average = Date().timeIntervalSince(start) * 1000 / 1000
+check(canvas.imageLayer.contents as AnyObject? === retainedContents, "Zoom reuses the uploaded image")
+check(checker?.path === retainedChecker, "Zoom does not rebuild transparency tiles")
+check(!canvas.needsDisplay, "Zoom does not schedule CPU canvas repainting")
+check(canvas.imageLayer.frame == canvas.viewport.rect, "Composited image follows viewport geometry")
+print(String(format: "Checked 1,000 layer-only zoom updates: %.3f ms average CPU submission (not GPU frame time)", average))
+
 print("\(failures) window-check failures")
 exit(failures == 0 ? 0 : 1)

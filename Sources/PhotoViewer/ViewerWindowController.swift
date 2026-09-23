@@ -58,7 +58,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         canvas.onOpen = { [weak self] in self?.openDocument(nil) }
         canvas.onDrop = { [weak self] in self?.open($0) }
         canvas.onNavigate = { [weak self] in self?.navigate($0) }
-        canvas.onZoom = { [weak self] in self?.updateStatus() }
+        canvas.onZoom = { [weak self] in self?.updateZoomIndicator() }
         canvas.onTogglePlayback = { [weak self] in self?.togglePlayback(nil) }
         canvas.onEscape = { [weak self] in
             guard let self else { return }
@@ -309,7 +309,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
                 guard let self, token == self.animationID, !self.animationPaused, !self.isClosed else { return }
                 let timer = Timer(timeInterval: max(0.01, delay - Date().timeIntervalSince(start)), repeats: false) { [weak self] _ in
                     guard let self, token == self.animationID, !self.animationPaused, !self.isClosed else { return }
-                    if let frame { self.canvas.image = frame; self.canvas.needsDisplay = true }
+                    if let frame { self.canvas.image = frame }
                     self.frameIndex = next; self.animateNext()
                 }
                 self.animationTimer = timer
@@ -323,9 +323,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
             button.isEnabled = ["open", "fullscreen"].contains(id) || (["previous", "next", "play"].contains(id) ? catalog.urls.count > 1 : hasImage)
         }
         zoomButton.isEnabled = hasImage
-        let percent = canvas.viewport.scale * (window?.backingScaleFactor ?? 1) * 100
-        zoomButton.title = hasImage ? String(format: "%.0f%%", percent) : "Fit"
-        zoomButton.setAccessibilityValue(zoomButton.title)
+        updateZoomIndicator()
         if let decoded {
             var parts = ["\(Int(decoded.pixelSize.width)) × \(Int(decoded.pixelSize.height))", decoded.typeName,
                          ByteCountFormatter.string(fromByteCount: Int64(decoded.fileSize), countStyle: .file)]
@@ -338,6 +336,12 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         status.toolTip = folderWarning ?? catalog.current?.path
         position.stringValue = catalog.urls.isEmpty ? "" : "\(catalog.index + 1) / \(catalog.urls.count)"
         buttons["play"]?.image = NSImage(systemSymbolName: slideshow == nil ? "play" : "pause", accessibilityDescription: "Slideshow")
+    }
+    private func updateZoomIndicator() {
+        let percent = canvas.viewport.scale * (window?.backingScaleFactor ?? 1) * 100
+        let title = decoded != nil ? String(format: "%.0f%%", percent) : "Fit"
+        guard zoomButton.title != title else { return }
+        zoomButton.title = title; zoomButton.setAccessibilityValue(title)
     }
     func navigate(_ delta: Int) {
         guard !catalog.urls.isEmpty else { return }
@@ -357,8 +361,8 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
     }
     @objc func previous(_ sender: Any?) { navigate(-1) }
     @objc func next(_ sender: Any?) { navigate(1) }
-    @objc func zoomIn(_ sender: Any?) { canvas.zoom(1.25) }
-    @objc func zoomOut(_ sender: Any?) { canvas.zoom(0.8) }
+    @objc func zoomIn(_ sender: Any?) { canvas.zoom(1.25, animated: true) }
+    @objc func zoomOut(_ sender: Any?) { canvas.zoom(0.8, animated: true) }
     @objc func fit(_ sender: Any?) { canvas.fit() }
     @objc func actualSize(_ sender: Any?) { canvas.actualSize() }
     @objc func rotate(_ sender: Any?) { canvas.rotate() }
@@ -402,7 +406,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         refreshWork?.cancel(); reloadWork?.cancel(); decoded = nil; canvas.image = nil
         loadingURL = nil; currentVersion = nil
     }
-    func windowDidMiniaturize(_ notification: Notification) { cancelPrefetch(); animationID = UUID(); animationTimer?.invalidate(); animationTimer = nil; stopSlideshow() }
+    func windowDidMiniaturize(_ notification: Notification) { canvas.stopZoomAnimation(); cancelPrefetch(); animationID = UUID(); animationTimer?.invalidate(); animationTimer = nil; stopSlideshow() }
     func windowDidDeminiaturize(_ notification: Notification) { animateNext(); prefetchNeighbors() }
     func windowDidChangeBackingProperties(_ notification: Notification) {
         canvas.viewport.nativeScale = 1 / (window?.backingScaleFactor ?? 1)

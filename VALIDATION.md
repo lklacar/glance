@@ -72,3 +72,11 @@ A local filesystem trace confirmed that updating an extended attribute emits an 
 The monitor now subscribes to content writes, extension, deletion, rename, and revocation, excluding attribute-only changes. Cache fingerprints ignore metadata change time while retaining inode, size, and nanosecond modification time. Repeated opens of the same unchanged image are ignored. A load retains the previous frame until the new image is ready; an initial load uses a plain loading state instead of the welcome illustration.
 
 All 21 core check groups pass locally. The added real-window-controller checks also pass without showing windows: metadata changes and duplicate opens preserve the image object and zoom; warmed navigation displays synchronously; cold loads never clear the displayed frame; atomic replacements and in-place edits reload without blank frames; corrupt replacements still report an error. `Scripts/check.sh` includes these controller checks so CI and release validation cover the regression.
+
+## Smooth zoom update
+
+All 24 core check groups and the window-controller checks pass locally. New checks verify that smoothed wheel zoom converges without overshooting, preserves pointer anchoring, responds consistently at simulated 60 Hz and 120 Hz, reverses immediately when requested, cancels cleanly, and bounds scroll input.
+
+The canvas now holds decoded pixels in a Core Animation layer. Zoom and pan update layer geometry; the transparency checkerboard path is built only when the canvas changes size. Offscreen layer rendering matches the previous image orientation in all four rotations. A sequence of 1,000 zoom updates preserved the image contents and checkerboard path without marking the canvas for repaint. CPU submission averaged approximately 0.002 ms per update on this Mac; this is not a GPU frame-time or visible-frame-rate measurement.
+
+Discrete wheel ticks and zoom buttons use a view-bound display link with a short time-based transition. Precise trackpad scrolling and pinch remain direct, scrolling momentum is accepted, and Reduce Motion bypasses transitions. Zoom updates only the percentage indicator instead of reformatting all image metadata. Physical trackpad behavior and sustained frame pacing on other hardware remain manual checks.

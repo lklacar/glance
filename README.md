@@ -36,6 +36,8 @@ The local build is ad-hoc signed. A build intended for distribution to other Mac
 
 Images appear in Finder-style natural filename order (`photo2` before `photo10`). Subfolders and hidden files are excluded, but an explicitly opened hidden or extensionless image remains viewable. Folder changes and replacements of the current image are detected automatically. Open Recent is available in the File menu. Closing the last window keeps the app available in the Dock.
 
+Zoom and pan use Core Animation to scale the decoded image without repainting it for every input event. Wheel ticks and zoom buttons use short, display-synchronized transitions anchored at the pointer or window center. Trackpad scrolling and pinch gestures respond directly, including scrolling momentum. Reduce Motion disables the added transitions.
+
 The viewer preloads up to **three images ahead and three behind**, including across the folder’s ends when navigation wraps. Ready images display directly from memory without a blank loading frame. Preloading runs on a separate background queue so it cannot queue ahead of a requested image. A **256 MiB cache budget** accounts for decoded pixels and source file sizes, preferring the closest images; decoder overhead and the displayed animation's frames are additional. Files are checked for edits, replacements, or removal before reuse. The cache clears on opening another image/folder or closing the window. Very large images or navigation faster than background decoding can still require a load.
 
 ## Formats and behavior
@@ -71,7 +73,7 @@ Use `ARCHS=x86_64` on Intel. The build stages a new bundle separately before rep
 
 `Scripts/check.sh` runs an executable regression suite without requiring XCTest or full Xcode. It checks folder filtering and ordering, both wrap directions, empty/single-image folders, refresh/removal, pointer-anchored zoom, panning bounds, resize behavior, Retina scaling, EXIF orientation, image round trips, animation frames and timing, invalid input, vector fallback, and large-image downsampling.
 
-It also runs `Scripts/check-window.sh`, which exercises the real window controller without showing test windows. These checks cover duplicate opens, metadata-only file changes, preloaded navigation, retaining the visible frame during a cold load, and reloading actual file edits/replacements without showing the empty state. Metadata such as Finder tags or last-opened attributes does not invalidate cached image pixels or trigger a reload.
+It also runs `Scripts/check-window.sh`, which exercises the real window controller without showing test windows. These checks cover duplicate opens, metadata-only file changes, preloaded navigation, retaining the visible frame during a cold load, and reloading actual file edits/replacements without showing the empty state. Metadata such as Finder tags or last-opened attributes does not invalidate cached image pixels or trigger a reload. Zoom checks cover convergence, pointer anchoring, refresh-rate independence, direction reversal, rendered orientation in all four rotations, and reuse of image contents and checkerboard geometry across repeated zoom updates.
 
 Small independently encoded format fixtures are committed under `Tests/Fixtures`. Regeneration is optional and uses `Scripts/make-fixtures.py` with Pillow 12.3 and WebP/AVIF support. Pillow is never needed to build or run the app.
 

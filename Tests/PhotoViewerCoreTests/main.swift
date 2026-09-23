@@ -285,6 +285,49 @@ final class PhotoViewerCoreTests {
         let warm = Date().timeIntervalSince(warmStart) / 1000
         print(String(format: "  2400×1600 PNG: cold decode %.2f ms; warm cache lookup %.3f ms average", cold * 1000, warm * 1000))
     }
+    func testSmoothZoomConvergesAndKeepsPointerAnchored() {
+        var viewport = Viewport(); viewport.imageSize = CGSize(width: 4000, height: 4000)
+        viewport.resize(CGSize(width: 1000, height: 1000)); viewport.fit()
+        let anchor = CGPoint(x: 300, y: 400)
+        let imagePoint = CGPoint(x: (anchor.x - viewport.rect.minX) / viewport.scale,
+                                 y: (anchor.y - viewport.rect.minY) / viewport.scale)
+        var motion = SmoothZoom()
+        motion.retarget(factor: 2, anchor: anchor, viewport: viewport)
+        let target = motion.targetScale!
+        for _ in 0..<60 {
+            let before = viewport.scale
+            motion.advance(seconds: 1.0 / 120, viewport: &viewport)
+            expectTrue(viewport.scale >= before && viewport.scale <= target)
+            expectEqual((anchor.x - viewport.rect.minX) / viewport.scale, imagePoint.x, accuracy: 0.00001)
+            expectEqual((anchor.y - viewport.rect.minY) / viewport.scale, imagePoint.y, accuracy: 0.00001)
+        }
+        expectEqual(viewport.scale, target); expectNil(motion.targetScale)
+    }
+    func testSmoothZoomRefreshRatesReversalAndCancellation() {
+        var sixty = Viewport(); sixty.imageSize = CGSize(width: 4000, height: 4000)
+        sixty.resize(CGSize(width: 1000, height: 1000)); sixty.fit()
+        var oneTwenty = sixty, a = SmoothZoom(), b = SmoothZoom()
+        let anchor = CGPoint(x: 500, y: 500)
+        a.retarget(factor: 4, anchor: anchor, viewport: sixty)
+        b.retarget(factor: 4, anchor: anchor, viewport: oneTwenty)
+        for _ in 0..<5 { a.advance(seconds: 1.0 / 60, viewport: &sixty) }
+        for _ in 0..<10 { b.advance(seconds: 1.0 / 120, viewport: &oneTwenty) }
+        expectEqual(sixty.scale, oneTwenty.scale, accuracy: 0.000001)
+        let beforeReverse = sixty.scale
+        a.retarget(factor: 0.8, anchor: anchor, viewport: sixty)
+        a.advance(seconds: 1.0 / 60, viewport: &sixty)
+        expectTrue(sixty.scale < beforeReverse)
+        a.cancel(); let stopped = sixty.scale
+        expectFalse(a.advance(seconds: 1, viewport: &sixty)); expectEqual(sixty.scale, stopped)
+        a.retarget(factor: .nan, anchor: anchor, viewport: sixty); expectNil(a.targetScale)
+    }
+    func testZoomInputIsBoundedAndPrecise() {
+        expectEqual(SmoothZoom.scrollFactor(delta: 0, precise: false), 1)
+        expectEqual(SmoothZoom.scrollFactor(delta: .infinity, precise: true), 1)
+        expectTrue(SmoothZoom.scrollFactor(delta: 1, precise: true) < SmoothZoom.scrollFactor(delta: 1, precise: false))
+        expectTrue(SmoothZoom.scrollFactor(delta: 10000, precise: false) < 1.25)
+        expectEqual(SmoothZoom.scrollFactor(delta: 5, precise: true) * SmoothZoom.scrollFactor(delta: -5, precise: true), 1, accuracy: 0.000001)
+    }
     func testMajorFormatsAreDiscovered() {
         for ext in ["JPG", "png", "heic", "webp", "avif", "jxl", "gif", "tiff", "bmp", "svg", "pdf", "psd", "dng", "cr3", "nef"] {
             expectTrue(ImageFormats.accepts(file("image.\(ext)")), ext)
@@ -316,5 +359,11 @@ do { try suite.setUpWithError(); try suite.testWarmNavigationReusesDecodedImages
 do { try suite.setUpWithError(); try suite.testCacheLookupTiming(); try suite.tearDownWithError(); print("Checked testCacheLookupTiming") } catch { fail("testCacheLookupTiming: \(error)") }
 do { try suite.setUpWithError(); try suite.testMetadataChangesKeepCachedImage(); try suite.tearDownWithError(); print("Checked testMetadataChangesKeepCachedImage") } catch { fail("testMetadataChangesKeepCachedImage: \(error)") }
 do { try suite.setUpWithError(); try suite.testFileMonitorIgnoresMetadataButDetectsContentWrites(); try suite.tearDownWithError(); print("Checked testFileMonitorIgnoresMetadataButDetectsContentWrites") } catch { fail("testFileMonitorIgnoresMetadataButDetectsContentWrites: \(error)") }
+suite.testSmoothZoomConvergesAndKeepsPointerAnchored()
+print("Checked testSmoothZoomConvergesAndKeepsPointerAnchored")
+suite.testSmoothZoomRefreshRatesReversalAndCancellation()
+print("Checked testSmoothZoomRefreshRatesReversalAndCancellation")
+suite.testZoomInputIsBoundedAndPrecise()
+print("Checked testZoomInputIsBoundedAndPrecise")
 print("\(failures) failures")
 exit(failures == 0 ? 0 : 1)
