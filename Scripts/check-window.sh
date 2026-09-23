@@ -11,3 +11,8 @@ swiftc -I "$binary_path/Modules" \
     Tests/GlanceWindowChecks/main.swift "$binary_path"/GlanceCore.build/*.swift.o \
     -o .build/window-checks/GlanceWindowChecks
 .build/window-checks/GlanceWindowChecks
+swiftc -I "$binary_path/Modules" \
+    Sources/Glance/CanvasView.swift Sources/Glance/ViewerWindowController.swift \
+    Tests/GlanceNetworkChecks/main.swift "$binary_path"/GlanceCore.build/*.swift.o \
+    -o .build/window-checks/GlanceNetworkChecks
+.build/window-checks/GlanceNetworkChecks

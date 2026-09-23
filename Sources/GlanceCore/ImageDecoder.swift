@@ -57,9 +57,12 @@ public enum ImageDecoder {
 
     public static func load(_ url: URL) throws -> DecodedImage {
         guard url.isFileURL else { throw ViewerError.unreadable(url.lastPathComponent) }
-        let fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        // Read once on the worker. ImageIO must not retain a file-backed provider
+        // that could perform network I/O later during presentation or animation.
+        let data = try Data(contentsOf: url)
+        let fileSize = data.count
         if !["svg", "pdf"].contains(url.pathExtension.lowercased()),
-           let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+           let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] {
             let width = (properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.doubleValue ?? 0
             let height = (properties[kCGImagePropertyPixelHeight as String] as? NSNumber)?.doubleValue ?? 0
@@ -76,10 +79,10 @@ public enum ImageDecoder {
             let animated = ["com.compuserve.gif", "public.png", "org.webmproject.webp"].contains(type)
             return DecodedImage(image: image, pixelSize: size, typeName: url.pathExtension.uppercased(),
                 frameCount: animated ? CGImageSourceGetCount(source) : 1, fileSize: fileSize,
-                source: source, maximumDimension: maximum)
+                source: animated ? source : nil, maximumDimension: maximum)
         }
         // AppKit handles SVG and PDF without a web view, network requests, or an external process.
-        guard ["svg", "pdf"].contains(url.pathExtension.lowercased()), let vector = NSImage(contentsOf: url),
+        guard ["svg", "pdf"].contains(url.pathExtension.lowercased()), let vector = NSImage(data: data),
               vector.size.width > 0, vector.size.height > 0,
               vector.size.width.isFinite, vector.size.height.isFinite else {
             throw ViewerError.unreadable(url.lastPathComponent)

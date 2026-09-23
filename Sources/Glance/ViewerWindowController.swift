@@ -6,6 +6,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
     private let status = NSTextField(labelWithString: "Scroll to zoom  ·  ← → to browse")
     private let position = NSTextField(labelWithString: "")
     private let progress = NSProgressIndicator()
+    private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
     private let zoomButton = NSButton(title: "Fit", target: nil, action: nil)
     private var buttons: [String: NSButton] = [:]
     private(set) var catalog = FolderCatalog()
@@ -13,13 +14,20 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
     private var decoded: DecodedImage?
     private var currentVersion: ImageFileVersion?
     private var loadingURL: URL?
+    private let fileAccess: ImageFileAccess
+    private let openQueue = OperationQueue()
+    private let monitorQueue = OperationQueue()
+    private let animationQueue = OperationQueue()
     private let decodeQueue = OperationQueue()
     private let prefetchQueue = OperationQueue()
     private let imageCache = ImageCache()
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     private var memoryIsConstrained = false
     private var prefetchID = UUID()
-    private let scanQueue = DispatchQueue(label: "rs.qubit.glance.folder", qos: .userInitiated)
+    private let scanQueue = OperationQueue()
+    private var openID = UUID()
+    private var pendingOpenURL: URL?
+    private var explicitURL: URL?
     private var requestID = UUID()
     private var folderID = UUID()
     private var animationID = UUID()
@@ -34,7 +42,8 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
     private var folderWarning: String?
     private var isClosed = false
 
-    init() {
+    init(fileAccess: ImageFileAccess = ImageFileAccess()) {
+        self.fileAccess = fileAccess
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         super.init(window: window)
@@ -48,7 +57,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         window.collectionBehavior.insert(.fullScreenPrimary)
         window.isReleasedWhenClosed = false
         window.delegate = self
-        decodeQueue.name = "rs.qubit.glance.decoder"; decodeQueue.maxConcurrentOperationCount = 1
+        decodeQueue.name = "rs.qubit.glance.decoder"; decodeQueue.maxConcurrentOperationCount = 2
         decodeQueue.qualityOfService = .userInitiated
         prefetchQueue.name = "rs.qubit.glance.prefetch"; prefetchQueue.maxConcurrentOperationCount = 1
         prefetchQueue.qualityOfService = .utility
@@ -59,6 +68,12 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         }
         memoryPressureSource = pressure
         pressure.resume()
+        for (queue, name, count) in [(openQueue, "open", 2), (scanQueue, "folder", 2),
+                                      (monitorQueue, "monitor", 2), (animationQueue, "animation", 1)] {
+            queue.name = "rs.qubit.glance." + name
+            queue.maxConcurrentOperationCount = count
+            queue.qualityOfService = queue === monitorQueue ? .utility : .userInitiated
+        }
         buildContent()
         let toolbar = NSToolbar(identifier: "ViewerToolbar")
         toolbar.delegate = self; toolbar.displayMode = .iconOnly
@@ -72,6 +87,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         canvas.onContextMenu = { [weak self] in self?.imageContextMenu() }
         canvas.onEscape = { [weak self] in
             guard let self else { return }
+            if pendingOpenURL != nil || loadingURL != nil { cancelLoading(nil) }
             stopSlideshow()
             if window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
         }
@@ -99,7 +115,10 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         position.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         position.textColor = .secondaryLabelColor
         progress.style = .spinning; progress.controlSize = .small; progress.isDisplayedWhenStopped = false
-        for view in [status, position, progress] { view.translatesAutoresizingMaskIntoConstraints = false; footer.addSubview(view) }
+        cancelButton.target = self; cancelButton.action = #selector(cancelLoading(_:))
+        cancelButton.bezelStyle = .inline; cancelButton.controlSize = .small; cancelButton.isHidden = true
+        cancelButton.setAccessibilityLabel("Cancel image loading")
+        for view in [status, position, progress, cancelButton] { view.translatesAutoresizingMaskIntoConstraints = false; footer.addSubview(view) }
         NSLayoutConstraint.activate([
             canvas.topAnchor.constraint(equalTo: content.safeAreaLayoutGuide.topAnchor),
             canvas.leadingAnchor.constraint(equalTo: content.leadingAnchor), canvas.trailingAnchor.constraint(equalTo: content.trailingAnchor),
@@ -108,7 +127,9 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
             footer.bottomAnchor.constraint(equalTo: content.bottomAnchor), footer.heightAnchor.constraint(equalToConstant: 30),
             status.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 16), status.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
             position.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -16), position.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
-            progress.trailingAnchor.constraint(equalTo: position.leadingAnchor, constant: -10), progress.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
+            cancelButton.trailingAnchor.constraint(equalTo: position.leadingAnchor, constant: -10),
+            cancelButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
+            progress.trailingAnchor.constraint(equalTo: cancelButton.leadingAnchor, constant: -8), progress.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
             progress.widthAnchor.constraint(equalToConstant: 16), progress.heightAnchor.constraint(equalToConstant: 16),
             status.trailingAnchor.constraint(lessThanOrEqualTo: progress.leadingAnchor, constant: -12)
         ])
@@ -145,55 +166,111 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         return item
     }
 
+    /// Operations are bounded; cancellation discards stale work without waiting for
+    /// a network filesystem call that the OS may not be able to interrupt.
+    private func perform(on queue: OperationQueue, _ work: @escaping (BlockOperation) -> Void) {
+        let operation = BlockOperation()
+        operation.addExecutionBlock { [weak operation] in
+            guard let operation, !operation.isCancelled else { return }
+            work(operation)
+        }
+        queue.addOperation(operation)
+    }
+    private func cancelPendingOpen() {
+        openID = UUID(); pendingOpenURL = nil
+        openQueue.cancelAllOperations()
+    }
     func open(_ input: URL, showWindow: Bool = true) {
         guard input.isFileURL else { return }
         isClosed = false
         if showWindow { self.showWindow(nil); window?.makeKeyAndOrderFront(nil); window?.makeFirstResponder(canvas) }
-        stopSlideshow()
-        // Folder enumeration resolves directory aliases. Use the same canonical
-        // path for explicit opens so the current image is not appended twice.
-        let url = input.standardizedFileURL.resolvingSymlinksInPath()
-        // Finder can deliver the same open request more than once during launch.
-        if catalog.current == url, let version = currentVersion,
-           version == ImageFileVersion(url: url), loadingURL == url || decoded != nil { return }
-        var isDirectory: ObjCBool = false
-        FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
-        let newFolder = isDirectory.boolValue ? url : url.deletingLastPathComponent()
-        folder = newFolder; folderID = UUID(); folderWarning = nil
-        cancelPrefetch(); imageCache.removeAll()
-        refreshWork?.cancel(); folderMonitor = nil; fileMonitor = nil
-        catalog = FolderCatalog(urls: isDirectory.boolValue ? [] : [url], selecting: url)
-        folderMonitor = FileMonitor(url: newFolder) { [weak self] in self?.scheduleRefresh() }
-        if isDirectory.boolValue {
-            cancelDecoding(); decoded = nil
-            loadingURL = nil; currentVersion = nil
-            canvas.beginLoading()
-        } else { loadCurrent() }
-        scanFolder()
+        if pendingOpenURL == input || loadingURL == input { return }
+        stopSlideshow(); cancelPendingOpen(); cancelPrefetch(); cancelDecoding()
+        scanID = UUID(); scanQueue.cancelAllOperations()
+        pendingOpenURL = input; loadingURL = input
+        canvas.beginLoading(); progress.startAnimation(nil); updateStatus()
+        let token = openID, access = fileAccess
+        perform(on: openQueue) { [weak self] operation in
+            let result = Result { try access.resolve(input) }
+            guard !operation.isCancelled else { return }
+            let version = (try? result.get()).flatMap { $0.isDirectory ? nil : access.version($0.url) }
+            guard !operation.isCancelled else { return }
+            DispatchQueue.main.async {
+                guard let self, self.openID == token, !self.isClosed else { return }
+                self.pendingOpenURL = nil
+                switch result {
+                case .success(let location):
+                    let url = location.url
+                    if !location.isDirectory, self.catalog.current == url,
+                       version != nil, version == self.currentVersion, self.decoded != nil {
+                        self.loadingURL = nil; self.canvas.finishLoading(); self.progress.stopAnimation(nil)
+                        self.updateStatus(); self.animateNext(); self.watchCurrentFile(url); self.scanFolder()
+                        return
+                    }
+                    self.folder = location.isDirectory ? url : url.deletingLastPathComponent()
+                    self.explicitURL = location.isDirectory ? nil : url
+                    self.folderID = UUID(); self.folderWarning = nil
+                    self.imageCache.removeAll(); self.decoded = nil; self.currentVersion = nil
+                    self.refreshWork?.cancel(); self.folderMonitor = nil; self.fileMonitor = nil
+                    self.catalog = FolderCatalog(urls: location.isDirectory ? [] : [url], selecting: url)
+                    self.watchFolder()
+                    if !location.isDirectory { self.loadCurrent() }
+                    self.scanFolder()
+                case .failure(let error):
+                    self.loadingURL = nil; self.decoded = nil; self.currentVersion = nil
+                    self.progress.stopAnimation(nil)
+                    self.canvas.showMessage("Couldn’t open this location", detail: error.localizedDescription)
+                    self.updateStatus()
+                }
+            }
+        }
     }
-
-    private func scanFolder() {
+    private func watchFolder() {
         guard let folder else { return }
+        let token = folderID, access = fileAccess
+        perform(on: monitorQueue) { [weak self] operation in
+            let monitor = access.monitor(folder) { [weak self] in
+                guard let self, self.folderID == token, !self.isClosed, self.pendingOpenURL == nil else { return }
+                self.scheduleRefresh()
+            }
+            guard !operation.isCancelled else { return }
+            DispatchQueue.main.async {
+                guard let self, self.folderID == token, !self.isClosed else { return }
+                self.folderMonitor = monitor
+            }
+        }
+    }
+    private func scanFolder() {
+        guard let folder, pendingOpenURL == nil else { return }
         let folderToken = folderID, token = UUID(); scanID = token
-        scanQueue.async { [weak self] in
-            let result = Result { try FolderCatalog.scan(folder) }
+        scanQueue.cancelAllOperations()
+        let access = fileAccess, explicit = explicitURL
+        perform(on: scanQueue) { [weak self] operation in
+            let result = Result { () throws -> [URL] in
+                var urls = try access.scan(folder)
+                guard !operation.isCancelled else { return [] }
+                // Keep an explicitly opened hidden/extensionless file, checking
+                // its existence here rather than in the main-queue completion.
+                if let explicit, !urls.contains(explicit), access.exists(explicit) {
+                    urls.append(explicit)
+                    urls.sort { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+                }
+                return urls
+            }
+            guard !operation.isCancelled else { return }
             DispatchQueue.main.async {
                 guard let self, folderToken == self.folderID, token == self.scanID, !self.isClosed else { return }
                 switch result {
-                case .success(var urls):
-                    // An explicitly opened hidden or extensionless image is still viewable.
-                    if let current = self.catalog.current, !urls.contains(current), FileManager.default.fileExists(atPath: current.path) {
-                        urls.append(current)
-                        urls.sort { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-                    }
+                case .success(let urls):
                     let before = self.catalog.current
                     self.catalog.refresh(urls)
-                    if self.catalog.current != before || (self.decoded == nil && before == nil) { self.loadCurrent() }
                     self.folderWarning = nil
-                    self.prefetchNeighbors()
+                    if self.catalog.current != before || (self.decoded == nil && before == nil) { self.loadCurrent() }
+                    else if self.loadingURL == nil { self.prefetchNeighbors() }
                 case .failure(let error):
                     self.folderWarning = "Folder unavailable: \(error.localizedDescription)"
                     if self.catalog.current == nil {
+                        self.loadingURL = nil; self.progress.stopAnimation(nil)
                         self.canvas.showMessage("Couldn’t read this folder", detail: error.localizedDescription)
                     }
                 }
@@ -208,7 +285,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
     private func cancelDecoding() {
-        requestID = UUID(); animationID = UUID(); decodeQueue.cancelAllOperations()
+        requestID = UUID(); animationID = UUID(); decodeQueue.cancelAllOperations(); animationQueue.cancelAllOperations()
         animationTimer?.invalidate(); animationTimer = nil
         progress.stopAnimation(nil)
     }
@@ -222,59 +299,67 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
             canvas.showMessage("No images in this folder", detail: "Open another image or folder with ⌘O")
             updateStatus(); return
         }
-        let token = requestID
-        loadingURL = url; currentVersion = ImageFileVersion(url: url)
-        window?.title = url.lastPathComponent; window?.representedURL = url
-        if let cached = imageCache.image(for: url) {
-            present(cached, at: url)
-            watchCurrentFile(url)
-            updateStatus()
-            prefetchNeighbors()
-            return
-        }
-        canvas.beginLoading()
-        progress.startAnimation(nil); updateStatus()
-        let operation = BlockOperation()
-        operation.addExecutionBlock { [weak self, weak operation] in
-            guard operation?.isCancelled == false else { return }
-            let version = ImageFileVersion(url: url)
-            let result = autoreleasepool { Result { try ImageDecoder.load(url) } }
-            guard operation?.isCancelled == false else { return }
+        let token = requestID, access = fileAccess, cached = imageCache.entry(for: url)
+        loadingURL = url
+        // representedURL asks AppKit for file icons/metadata, potentially over SMB.
+        // Keep the filename in the title without performing that work on the UI thread.
+        window?.title = url.lastPathComponent
+        canvas.beginLoading(); progress.startAnimation(nil); updateStatus()
+        perform(on: decodeQueue) { [weak self] operation in
+            let version = access.version(url)
+            guard !operation.isCancelled else { return }
+            let result: Result<DecodedImage, Error> = autoreleasepool {
+                if let cached, version == cached.version { return .success(cached.image) }
+                return Result { try access.load(url) }
+            }
+            guard !operation.isCancelled else { return }
+            let after: ImageFileVersion?
+            if case .success = result { after = access.version(url) }
+            else { after = version }
+            guard !operation.isCancelled else { return }
             DispatchQueue.main.async {
                 guard let self, token == self.requestID, !self.isClosed else { return }
+                // Never publish pixels decoded across an edit or replacement.
+                if case .success = result, version != after {
+                    self.imageCache.remove(url); self.scheduleFileReload(); return
+                }
                 self.progress.stopAnimation(nil)
-                self.loadingURL = nil; self.currentVersion = version
+                self.loadingURL = nil; self.currentVersion = after
                 switch result {
                 case .success(let image):
-                    if let version { self.imageCache.insert(image, for: url, version: version) }
+                    if let version { self.imageCache.insert(image, for: url, version: version, currentVersion: after) }
                     self.present(image, at: url)
                 case .failure(let error):
+                    self.imageCache.remove(url)
                     self.canvas.showMessage("Couldn’t display this image", detail: error.localizedDescription)
                 }
                 self.watchCurrentFile(url)
-                self.updateStatus()
-                self.prefetchNeighbors()
+                self.updateStatus(); self.prefetchNeighbors()
             }
         }
-        decodeQueue.addOperation(operation)
     }
     private func present(_ image: DecodedImage, at url: URL) {
         loadingURL = nil
         decoded = image; canvas.display(image)
         canvas.setAccessibilityValue("\(url.lastPathComponent), \(Int(image.pixelSize.width)) by \(Int(image.pixelSize.height)) pixels")
-        NSDocumentController.shared.noteNewRecentDocumentURL(url)
+        RecentImages.note(url)
         animateNext()
     }
     private func watchCurrentFile(_ url: URL) {
-        fileMonitor = FileMonitor(url: url) { [weak self] in
-            guard let self, self.catalog.current == url else { return }
-            self.imageCache.remove(url)
-            self.scheduleFileReload()
-        }
-        // Catch edits that happened between decoding and attaching the monitor.
-        if ImageFileVersion(url: url) != currentVersion {
-            imageCache.remove(url)
-            scheduleFileReload()
+        let token = requestID, access = fileAccess, version = currentVersion
+        perform(on: monitorQueue) { [weak self] operation in
+            let monitor = access.monitor(url) { [weak self] in
+                guard let self, token == self.requestID, !self.isClosed, self.pendingOpenURL == nil else { return }
+                self.imageCache.remove(url); self.scheduleFileReload()
+            }
+            guard !operation.isCancelled else { return }
+            let latest = access.version(url)
+            guard !operation.isCancelled else { return }
+            DispatchQueue.main.async {
+                guard let self, token == self.requestID, !self.isClosed else { return }
+                self.fileMonitor = monitor
+                if latest != version { self.imageCache.remove(url); self.scheduleFileReload() }
+            }
         }
     }
     private func cancelPrefetch() {
@@ -284,45 +369,65 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         cancelPrefetch()
         let neighbors = catalog.nearbyURLs()
         imageCache.setPriority(neighbors)
-        guard !isClosed, !memoryIsConstrained, window?.isMiniaturized != true else { return }
+        guard !isClosed, !memoryIsConstrained, loadingURL == nil, pendingOpenURL == nil,
+              window?.isMiniaturized != true else { return }
         prefetchNext(Array(neighbors.dropFirst()), token: prefetchID)
     }
     private func prefetchNext(_ urls: [URL], token: UUID) {
         guard token == prefetchID, !isClosed, let url = urls.first else { return }
-        let remaining = Array(urls.dropFirst())
-        if imageCache.image(for: url) != nil { prefetchNext(remaining, token: token); return }
-        let operation = BlockOperation()
-        operation.addExecutionBlock { [weak self, weak operation] in
-            guard operation?.isCancelled == false else { return }
-            let version = ImageFileVersion(url: url)
-            let image = autoreleasepool { try? ImageDecoder.load(url) }
-            guard operation?.isCancelled == false else { return }
+        let remaining = Array(urls.dropFirst()), cached = imageCache.entry(for: url), access = fileAccess
+        perform(on: prefetchQueue) { [weak self] operation in
+            let version = access.version(url)
+            guard !operation.isCancelled else { return }
+            let image = autoreleasepool { () -> DecodedImage? in
+                if let cached, version == cached.version { return cached.image }
+                return try? access.load(url)
+            }
+            guard !operation.isCancelled else { return }
+            let after = access.version(url)
+            guard !operation.isCancelled else { return }
             DispatchQueue.main.async {
                 guard let self, token == self.prefetchID, !self.isClosed else { return }
-                if let image, let version { self.imageCache.insert(image, for: url, version: version) }
-                // Schedule just one decode at a time so finished images cannot pile up
-                // in main-queue callbacks while the user is navigating or resizing.
+                if let image, let version, version == after {
+                    self.imageCache.insert(image, for: url, version: version, currentVersion: after)
+                } else { self.imageCache.remove(url) }
                 self.prefetchNext(remaining, token: token)
             }
         }
-        prefetchQueue.addOperation(operation)
     }
     private var reloadWork: DispatchWorkItem?
     private func scheduleFileReload() {
         reloadWork?.cancel()
         let token = requestID
         let work = DispatchWorkItem { [weak self] in
-            guard let self, token == self.requestID, !self.isClosed else { return }
-            if let url = self.catalog.current, FileManager.default.fileExists(atPath: url.path) { self.loadCurrent() }
-            else { self.scanFolder() }
+            guard let self, token == self.requestID, !self.isClosed, self.pendingOpenURL == nil,
+                  let url = self.catalog.current else { return }
+            let access = self.fileAccess
+            self.perform(on: openQueue) { [weak self] operation in
+                let exists = access.exists(url)
+                guard !operation.isCancelled else { return }
+                DispatchQueue.main.async {
+                    guard let self, token == self.requestID, !self.isClosed, self.pendingOpenURL == nil else { return }
+                    if exists { self.loadCurrent() } else { self.scanFolder() }
+                }
+            }
         }
         reloadWork = work; DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+    }
+    @objc func cancelLoading(_ sender: Any?) {
+        guard loadingURL != nil || pendingOpenURL != nil else { return }
+        stopSlideshow()
+        cancelPendingOpen(); cancelDecoding(); cancelPrefetch()
+        scanID = UUID(); scanQueue.cancelAllOperations(); reloadWork?.cancel(); refreshWork?.cancel()
+        loadingURL = nil; decoded = nil; currentVersion = nil
+        canvas.showMessage("Loading cancelled", detail: "Use ← → to browse, or ⌘O to open another image")
+        updateStatus()
     }
     private func animateNext() {
         guard let decoded, decoded.frameCount > 1, !animationPaused, !isClosed, window?.isMiniaturized != true else { return }
         let token = animationID, index = frameIndex, next = (frameIndex + 1) % decoded.frameCount
         let start = Date()
-        decodeQueue.addOperation { [weak self] in
+        animationQueue.addOperation { [weak self] in
             let delay = decoded.duration(at: index)
             let frame = autoreleasepool { decoded.frame(at: next) }
             DispatchQueue.main.async {
@@ -338,13 +443,17 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         }
     }
     private func updateStatus() {
-        let hasImage = decoded != nil
+        let loading = loadingURL != nil || pendingOpenURL != nil
+        cancelButton.isHidden = !loading
+        let hasImage = decoded != nil && !loading
         for (id, button) in buttons {
             button.isEnabled = ["open", "fullscreen"].contains(id) || (["previous", "next", "play"].contains(id) ? catalog.urls.count > 1 : hasImage)
         }
         zoomButton.isEnabled = hasImage
         updateZoomIndicator()
-        if let decoded {
+        if loading, let url = loadingURL ?? pendingOpenURL {
+            status.stringValue = "Loading \(url.lastPathComponent)…  ·  Esc to cancel"
+        } else if let decoded {
             var parts = ["\(Int(decoded.pixelSize.width)) × \(Int(decoded.pixelSize.height))", decoded.typeName,
                          ByteCountFormatter.string(fromByteCount: Int64(decoded.fileSize), countStyle: .file)]
             if decoded.frameCount > 1 { parts.append(animationPaused ? "Paused" : "Animated") }
@@ -365,6 +474,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
     }
     func navigate(_ delta: Int) {
         guard !catalog.urls.isEmpty else { return }
+        cancelPendingOpen()
         if delta == Int.min { catalog.select(0) }
         else if delta == Int.max { catalog.select(catalog.urls.count - 1) }
         else { catalog.move(delta) }
@@ -451,13 +561,14 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
         case #selector(previous(_:)), #selector(next(_:)), #selector(toggleSlideshow(_:)): return catalog.urls.count > 1
-        case #selector(reveal(_:)), #selector(copy(_:)): return catalog.current != nil
+        case #selector(reveal(_:)), #selector(copy(_:)): return catalog.current != nil && !canvas.isLoading
         case #selector(togglePlayback(_:)): return (decoded?.frameCount ?? 0) > 1 || catalog.urls.count > 1
-        case #selector(zoomIn(_:)), #selector(zoomOut(_:)), #selector(fit(_:)), #selector(actualSize(_:)), #selector(rotate(_:)), #selector(showInfo(_:)): return decoded != nil
+        case #selector(zoomIn(_:)), #selector(zoomOut(_:)), #selector(fit(_:)), #selector(actualSize(_:)), #selector(rotate(_:)), #selector(showInfo(_:)): return decoded != nil && !canvas.isLoading
         default: return true
         }
     }
     func windowWillClose(_ notification: Notification) {
+        cancelPendingOpen(); scanID = UUID(); scanQueue.cancelAllOperations(); monitorQueue.cancelAllOperations()
         cancelPrefetch(); imageCache.removeAll()
         isClosed = true; cancelDecoding(); stopSlideshow(); folderMonitor = nil; fileMonitor = nil
         refreshWork?.cancel(); reloadWork?.cancel(); decoded = nil; canvas.image = nil

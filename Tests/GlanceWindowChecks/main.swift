@@ -57,7 +57,8 @@ RunLoop.main.run(until: Date().addingTimeInterval(0.8))
 check(viewer.canvas.image === originalFrame, "Metadata event does not decode/display the image again")
 check(viewer.canvas.viewport.scale == originalScale, "Metadata event preserves zoom")
 viewer.open(first, showWindow: false)
-check(viewer.canvas.image === originalFrame && !viewer.canvas.isLoading, "Duplicate open is immediately ignored")
+waitFor("Duplicate open validates asynchronously") { !viewer.canvas.isLoading }
+check(viewer.canvas.image === originalFrame, "Duplicate open preserves the decoded image")
 RunLoop.main.run(until: Date().addingTimeInterval(0.5))
 check(viewer.canvas.image === originalFrame, "Duplicate open does not schedule a later reload")
 check(viewer.canvas.viewport.scale == originalScale, "Duplicate open preserves zoom")
@@ -69,6 +70,9 @@ func performContextAction(_ title: String, in controller: ViewerWindowController
     }
     check(item.target === controller && item.isEnabled, "Context action targets the image's controller: \(title)")
     menu.performActionForItem(at: menu.index(of: item))
+    if title == "Next Image" || title == "Previous Image" {
+        waitFor("Context navigation finishes") { !controller.canvas.isLoading }
+    }
 }
 performContextAction("Fit to Window", in: viewer)
 check(viewer.canvas.viewport.fitsWindow, "Context-menu fit action works")
@@ -91,7 +95,8 @@ check(viewer.catalog.current == first, "Context-menu previous action navigates")
 print("Checked context-menu routing, zoom modes, rotation, navigation, and slideshow state")
 
 viewer.navigate(1)
-check(viewer.canvas.image !== originalFrame && !viewer.canvas.isLoading, "Prefetched next image displays synchronously")
+waitFor("Prefetched next image validates and displays asynchronously") { !viewer.canvas.isLoading }
+check(viewer.canvas.image !== originalFrame, "Prefetched navigation displays the next image")
 check(viewer.canvas.viewport.imageSize.width == 800, "Next image is correct")
 let nextFrame = viewer.canvas.image
 // Force a cold open (opening a folder/file clears the cache).
@@ -113,9 +118,12 @@ waitFor("Navigation still loads while memory is constrained") { !viewer.canvas.i
 viewer.handleMemoryPressure(.normal)
 RunLoop.main.run(until: Date().addingTimeInterval(0.3))
 viewer.navigate(-1)
-check(!viewer.canvas.isLoading && viewer.catalog.current == first, "Neighbor preloading resumes after memory pressure")
+waitFor("Prefetched navigation resumes after memory pressure") { !viewer.canvas.isLoading }
+check(viewer.catalog.current == first, "Neighbor preloading resumes after memory pressure")
 print("Checked memory-pressure cache release and prefetch recovery")
 
+viewer.open(first, showWindow: false)
+waitFor("Duplicate open restores content watching") { !viewer.canvas.isLoading }
 let oldFrame = viewer.canvas.image
 try writeImage(replacement, width: 600, height: 300)
 try Data(contentsOf: replacement).write(to: first, options: .atomic)

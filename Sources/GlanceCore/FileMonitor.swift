@@ -10,7 +10,7 @@ public final class FileMonitor {
         let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor,
             eventMask: [.write, .delete, .rename, .extend, .revoke], queue: .main)
         source.setEventHandler(handler: handler)
-        source.setCancelHandler { close(descriptor) }
+        source.setCancelHandler { DispatchQueue.global(qos: .utility).async { close(descriptor) } }
         self.source = source; source.resume()
     }
     deinit { source?.cancel() }

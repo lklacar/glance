@@ -113,7 +113,7 @@ Repeat for each format you want Glance to open by default. Use **Change All…**
 | Pause / resume animation | **Space** |
 | Toggle five-second slideshow | **⇧⌘P**; **Space** on still images |
 | Toggle full screen | **⌃⌘F** |
-| Stop slideshow / leave full screen | **Escape** |
+| Cancel loading / stop slideshow / leave full screen | **Escape** |
 | Image information | **⌘I** |
 | Reveal file in Finder | **⇧⌘R** |
 | Copy image file | **⌘C** |
@@ -143,7 +143,7 @@ Zoom and pan update Core Animation layers without repainting the decoded image f
 
 A separate background queue preloads up to three images before and after the current image. The cache favors nearby images within a budget of **one-sixteenth of the Mac's RAM, bounded between 256 MiB and 1 GiB**, for accounted decoded pixels and source-file sizes. This keeps large neighboring photos resident on Macs with enough RAM. When macOS reports memory pressure, Glance releases cached images and suspends preloading until pressure subsides, preserving the displayed image. Decoder overhead and animation frames use additional memory, so the cache budget is not a total process-memory limit. Large images or rapid navigation can still require a load.
 
-Cached files are checked for edits, replacement, and removal before reuse. An uncached navigation retains the previous frame until the next one is ready. GIF, APNG, and WebP frames decode sequentially, and animation pauses when the window is minimized.
+File reads, folder scans, cache validation, and file-watcher setup run on background workers, including for mounted network volumes. While an image loads, Glance keeps the previous frame visible and shows a loading indicator. Use **Cancel** or **Escape** to stop waiting, or navigate to another image. Superseded loads cannot replace the current selection. Cached files are checked for edits, replacement, and removal in the background before reuse. GIF, APNG, and WebP frames decode sequentially, and animation pauses when the window is minimized.
 
 SVG/PDF previews are rasterized at a bounded resolution. Raster and vector previews never modify the original file.
 
@@ -151,7 +151,7 @@ SVG/PDF previews are rasterized at a bounded resolution. Raster and vector previ
 
 ## Privacy
 
-The app works locally. It has no accounts, telemetry, network requests, or third-party runtime dependencies. Your images stay on your Mac, and viewing or rotating them does not change their contents.
+The app has no accounts, telemetry, cloud service, or third-party runtime dependencies. Glance reads images where you open them, including mounted network volumes, without uploading them to a service. Viewing or rotating images does not change their contents.
 
 The banner and badges in this README are served by [shieldcn](https://shieldcn.dev/); they are not part of the app.
 
@@ -166,6 +166,10 @@ Set the default for the entire format using **Get Info → Open with → Glance 
 ### An image will not open, or looks different from its editor
 
 Check whether your macOS version supports the file's codec or camera model. Glance shows a first page, composite, or bounded preview where appropriate; it does not reproduce an editor's layers, RAW adjustments, or HDR workflow. If opening fails, you can still browse to the next image.
+
+### A mounted network volume is slow or disconnected
+
+The window remains usable while Glance waits for the filesystem. Click **Cancel** or press **Escape** to stop waiting. You can also move to another image or open a different folder. Glance reports read errors when macOS returns them. Background work is bounded: Cancel discards the result, but macOS may keep an underlying network read pending until the server responds or the system times out. If all foreground workers are waiting on the volume, a new image may also have to wait.
 
 ### HEIC checks or icon generation fail during a build
 
@@ -200,7 +204,7 @@ Use `ARCHS=x86_64` for an Intel-only build. The bundle verifier expects the defa
 | [Resources](Resources) | Bundle metadata and privacy manifest |
 | [Scripts](Scripts) | Build, verification, icon generation, and release tooling |
 
-The regression suite covers navigation, decoding, cache invalidation, file changes, zoom behavior, and window rendering. It runs without XCTest or a full Xcode installation. [VALIDATION.md](VALIDATION.md) records completed checks and remaining release-testing gaps, including physical Intel hardware, supported macOS versions, and additional camera RAW variants.
+The regression suite covers navigation, decoding, cache invalidation, file changes, zoom behavior, window rendering, and responsiveness during simulated slow or disconnected filesystem access. It runs without XCTest or a full Xcode installation. [VALIDATION.md](VALIDATION.md) records completed checks and remaining release-testing gaps, including physical Intel hardware, supported macOS versions, and additional camera RAW variants.
 
 Fixture regeneration is optional and uses [Scripts/make-fixtures.py](Scripts/make-fixtures.py) with Pillow 12.3 and WebP/AVIF support. Python and Pillow are not required to build or run Glance.
 

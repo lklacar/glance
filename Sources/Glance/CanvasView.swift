@@ -80,6 +80,7 @@ final class CanvasView: NSView {
         viewport.imageSize = decoded.pixelSize; viewport.resize(bounds.size); viewport.fit()
         message = ""; detail = ""; needsDisplay = true; window?.invalidateCursorRects(for: self); onZoom?()
     }
+    func finishLoading() { isLoading = false; needsDisplay = true }
     func beginLoading() {
         stopZoomAnimation()
         // Keep the last frame until the replacement is ready; never draw the

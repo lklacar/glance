@@ -1,4 +1,5 @@
 import AppKit
+import GlanceCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var viewer: ViewerWindowController?
@@ -29,10 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func openRecent(_ sender: NSMenuItem) {
         if let url = sender.representedObject as? URL { currentViewer().open(url) }
     }
-    @objc private func clearRecent(_ sender: Any?) { NSDocumentController.shared.clearRecentDocuments(sender) }
+    @objc private func clearRecent(_ sender: Any?) { RecentImages.clear() }
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        for url in NSDocumentController.shared.recentDocumentURLs {
+        for url in RecentImages.urls {
             let item = NSMenuItem(title: url.lastPathComponent, action: #selector(openRecent(_:)), keyEquivalent: "")
             item.target = self; item.representedObject = url; item.toolTip = url.path; menu.addItem(item)
         }
@@ -43,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc func help(_ sender: Any?) {
         let alert = NSAlert(); alert.messageText = "Glance shortcuts"
-        alert.informativeText = "← / →     Previous / next image (loops)\nScroll or pinch     Zoom around the pointer\nDrag     Pan a zoomed image\nOption + scroll     Pan\n0 / ⌘0     Fit to window\n1 / ⌘1     Actual pixels\n+ / −     Zoom in / out\nDouble-click     Fit / actual pixels\n⌘R     Rotate view clockwise\nSpace     Pause animation / toggle slideshow\n⇧⌘P     Toggle slideshow (5 seconds)\n⌃⌘F     Toggle full screen\nEscape     Stop slideshow / leave full screen\n⌘I     Image information\n⇧⌘R     Show in Finder\n⌘O     Open an image or folder\n\nImages are never modified. TIFF, PDF, PSD, and image collections show the first page or composite. Camera RAW support depends on macOS."
+        alert.informativeText = "← / →     Previous / next image (loops)\nScroll or pinch     Zoom around the pointer\nDrag     Pan a zoomed image\nOption + scroll     Pan\n0 / ⌘0     Fit to window\n1 / ⌘1     Actual pixels\n+ / −     Zoom in / out\nDouble-click     Fit / actual pixels\n⌘R     Rotate view clockwise\nSpace     Pause animation / toggle slideshow\n⇧⌘P     Toggle slideshow (5 seconds)\n⌃⌘F     Toggle full screen\nEscape     Cancel loading / stop slideshow / leave full screen\n⌘I     Image information\n⇧⌘R     Show in Finder\n⌘O     Open an image or folder\n\nImages are never modified. TIFF, PDF, PSD, and image collections show the first page or composite. Camera RAW support depends on macOS."
         alert.runModal()
     }
     private func buildMenu() {

@@ -21,9 +21,9 @@ public struct ImageFileVersion: Equatable {
 
 /// Owned by the main thread. Background decoders hand completed images back to it.
 public final class ImageCache {
-    private struct Entry {
-        let image: DecodedImage
-        let version: ImageFileVersion
+    public struct Entry {
+        public let image: DecodedImage
+        public let version: ImageFileVersion
         let cost: Int
     }
     public let byteLimit: Int
@@ -48,15 +48,18 @@ public final class ImageCache {
         trim()
     }
 
-    public func image(for url: URL) -> DecodedImage? {
+    /// A memory-only snapshot. Validate its version on a worker before use.
+    public func entry(for url: URL) -> Entry? { entries[url] }
+
+    public func image(for url: URL, currentVersion: ImageFileVersion?) -> DecodedImage? {
         guard let entry = entries[url] else { return nil }
-        guard ImageFileVersion(url: url) == entry.version else { remove(url); return nil }
+        guard currentVersion == entry.version else { remove(url); return nil }
         return entry.image
     }
 
-    public func insert(_ image: DecodedImage, for url: URL, version: ImageFileVersion) {
+    public func insert(_ image: DecodedImage, for url: URL, version: ImageFileVersion, currentVersion: ImageFileVersion?) {
         // A file replaced during decoding must never become a valid cache entry.
-        guard priority.contains(url), ImageFileVersion(url: url) == version else { return }
+        guard priority.contains(url), currentVersion == version else { return }
         remove(url)
         let cost = image.image.bytesPerRow * image.image.height + max(0, image.fileSize)
         guard cost <= byteLimit else { return }

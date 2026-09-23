@@ -185,17 +185,17 @@ final class GlanceCoreTests {
         let cache = ImageCache(byteLimit: cost * 2)
         cache.setPriority(urls)
         for index in [3, 2, 1, 0] {
-            cache.insert(images[index], for: urls[index], version: try unwrap(ImageFileVersion(url: urls[index])))
+            cache.insert(images[index], for: urls[index], version: try unwrap(ImageFileVersion(url: urls[index])), currentVersion: ImageFileVersion(url: urls[index]))
             expectTrue(cache.totalCost <= cache.byteLimit)
         }
-        expectTrue(cache.image(for: urls[0]) === images[0])
-        expectTrue(cache.image(for: urls[1]) === images[1])
-        expectNil(cache.image(for: urls[2])); expectNil(cache.image(for: urls[3]))
+        expectTrue(cache.image(for: urls[0], currentVersion: ImageFileVersion(url: urls[0])) === images[0])
+        expectTrue(cache.image(for: urls[1], currentVersion: ImageFileVersion(url: urls[1])) === images[1])
+        expectNil(cache.image(for: urls[2], currentVersion: ImageFileVersion(url: urls[2]))); expectNil(cache.image(for: urls[3], currentVersion: ImageFileVersion(url: urls[3])))
         expectEqual(cache.count, 2)
         cache.setPriority([urls[3]])
         expectEqual(cache.count, 0); expectEqual(cache.totalCost, 0)
         let tiny = ImageCache(byteLimit: 1); tiny.setPriority(urls)
-        tiny.insert(images[0], for: urls[0], version: try unwrap(ImageFileVersion(url: urls[0])))
+        tiny.insert(images[0], for: urls[0], version: try unwrap(ImageFileVersion(url: urls[0])), currentVersion: ImageFileVersion(url: urls[0]))
         expectEqual(tiny.count, 0)
     }
     func testCacheKeepsLargeNeighborsWithinMemoryBudget() throws {
@@ -213,7 +213,7 @@ final class GlanceCoreTests {
                 CGImageDestinationAddImage(destination, image(width: sizes[index].0, height: sizes[index].1), nil)
                 expectTrue(CGImageDestinationFinalize(destination))
                 let decoded = try ImageDecoder.load(urls[index])
-                cache.insert(decoded, for: urls[index], version: try unwrap(ImageFileVersion(url: urls[index])))
+                cache.insert(decoded, for: urls[index], version: try unwrap(ImageFileVersion(url: urls[index])), currentVersion: ImageFileVersion(url: urls[index]))
             }
         }
         expectTrue(cache.totalCost > 256 * mib, "Regression fixture exceeds the old cache budget")
@@ -221,7 +221,7 @@ final class GlanceCoreTests {
         for _ in 0..<3 {
             for index in [1, 0, 2, 0] {
                 cache.setPriority([urls[index]] + urls.filter { $0 != urls[index] })
-                expectNotNil(cache.image(for: urls[index]))
+                expectNotNil(cache.image(for: urls[index], currentVersion: ImageFileVersion(url: urls[index])))
             }
         }
         expectEqual(cache.count, 3, "Large current, next, and previous images stay cached")
@@ -230,23 +230,23 @@ final class GlanceCoreTests {
         let url = try write("image.png"), decoded = try ImageDecoder.load(url)
         let cache = ImageCache(); cache.setPriority([url])
         let version = try unwrap(ImageFileVersion(url: url))
-        cache.insert(decoded, for: url, version: version)
-        expectTrue(cache.image(for: url) === decoded)
+        cache.insert(decoded, for: url, version: version, currentVersion: ImageFileVersion(url: url))
+        expectTrue(cache.image(for: url, currentVersion: ImageFileVersion(url: url)) === decoded)
         let original = try Data(contentsOf: url)
         let modified = try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as! Date
         // Replace with the same bytes and mtime. The inode/ctime still changes.
         try original.write(to: url, options: .atomic)
         try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
-        expectNil(cache.image(for: url))
-        cache.insert(decoded, for: url, version: version)
-        expectNil(cache.image(for: url), file: #filePath, line: #line)
-        cache.insert(decoded, for: url, version: try unwrap(ImageFileVersion(url: url)))
+        expectNil(cache.image(for: url, currentVersion: ImageFileVersion(url: url)))
+        cache.insert(decoded, for: url, version: version, currentVersion: ImageFileVersion(url: url))
+        expectNil(cache.image(for: url, currentVersion: ImageFileVersion(url: url)), file: #filePath, line: #line)
+        cache.insert(decoded, for: url, version: try unwrap(ImageFileVersion(url: url)), currentVersion: ImageFileVersion(url: url))
         let handle = try FileHandle(forWritingTo: url)
         try handle.seekToEnd(); try handle.write(contentsOf: Data([0])); try handle.close()
-        expectNil(cache.image(for: url))
-        cache.insert(decoded, for: url, version: try unwrap(ImageFileVersion(url: url)))
+        expectNil(cache.image(for: url, currentVersion: ImageFileVersion(url: url)))
+        cache.insert(decoded, for: url, version: try unwrap(ImageFileVersion(url: url)), currentVersion: ImageFileVersion(url: url))
         try FileManager.default.removeItem(at: url)
-        expectNil(cache.image(for: url)); expectEqual(cache.totalCost, 0)
+        expectNil(cache.image(for: url, currentVersion: ImageFileVersion(url: url))); expectEqual(cache.totalCost, 0)
     }
     func testWarmNavigationReusesDecodedImages() throws {
         let urls = try (0..<8).map { try write("image\($0).png") }
@@ -255,30 +255,30 @@ final class GlanceCoreTests {
         var loaded: [URL: DecodedImage] = [:]
         for url in catalog.nearbyURLs() {
             let image = try ImageDecoder.load(url); loaded[url] = image
-            cache.insert(image, for: url, version: try unwrap(ImageFileVersion(url: url)))
+            cache.insert(image, for: url, version: try unwrap(ImageFileVersion(url: url)), currentVersion: ImageFileVersion(url: url))
         }
         for delta in [1, 1, -1, -1, -1, -1, 1, 1] {
             let url = try unwrap(catalog.move(delta))
-            expectTrue(cache.image(for: url) === loaded[url], "Warm navigation must reuse the decoded object")
+            expectTrue(cache.image(for: url, currentVersion: ImageFileVersion(url: url)) === loaded[url], "Warm navigation must reuse the decoded object")
         }
         cache.removeAll(); expectEqual(cache.totalCost, 0); expectEqual(cache.count, 0)
         // Simulate a completion from a canceled folder after switching folders.
         cache.setPriority([file("another-folder.png")])
-        cache.insert(try unwrap(loaded[urls[0]]), for: urls[0], version: try unwrap(ImageFileVersion(url: urls[0])))
-        expectNil(cache.image(for: urls[0]))
+        cache.insert(try unwrap(loaded[urls[0]]), for: urls[0], version: try unwrap(ImageFileVersion(url: urls[0])), currentVersion: ImageFileVersion(url: urls[0]))
+        expectNil(cache.image(for: urls[0], currentVersion: ImageFileVersion(url: urls[0])))
     }
     func testMetadataChangesKeepCachedImage() throws {
         let url = try write("metadata.png")
         let image = try ImageDecoder.load(url)
         let version = try unwrap(ImageFileVersion(url: url))
-        let cache = ImageCache(); cache.setPriority([url]); cache.insert(image, for: url, version: version)
+        let cache = ImageCache(); cache.setPriority([url]); cache.insert(image, for: url, version: version, currentVersion: ImageFileVersion(url: url))
         var marker: UInt64 = 123
         let status = withUnsafeBytes(of: &marker) { bytes in
             setxattr(url.path, "rs.qubit.glance.test", bytes.baseAddress, bytes.count, 0, 0)
         }
         expectEqual(status, 0)
         expectEqual(ImageFileVersion(url: url), version)
-        expectTrue(cache.image(for: url) === image)
+        expectTrue(cache.image(for: url, currentVersion: ImageFileVersion(url: url)) === image)
     }
     func testFileMonitorIgnoresMetadataButDetectsContentWrites() throws {
         let url = try write("watched.png")
@@ -307,9 +307,9 @@ final class GlanceCoreTests {
         let decoded = try ImageDecoder.load(url)
         let cold = Date().timeIntervalSince(start)
         let cache = ImageCache(); cache.setPriority([url])
-        cache.insert(decoded, for: url, version: try unwrap(ImageFileVersion(url: url)))
+        cache.insert(decoded, for: url, version: try unwrap(ImageFileVersion(url: url)), currentVersion: ImageFileVersion(url: url))
         let warmStart = Date()
-        for _ in 0..<1000 { expectTrue(cache.image(for: url) === decoded) }
+        for _ in 0..<1000 { expectTrue(cache.image(for: url, currentVersion: ImageFileVersion(url: url)) === decoded) }
         let warm = Date().timeIntervalSince(warmStart) / 1000
         print(String(format: "  2400×1600 PNG: cold decode %.2f ms; warm cache lookup %.3f ms average", cold * 1000, warm * 1000))
     }
