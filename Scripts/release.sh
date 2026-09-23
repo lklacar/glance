@@ -7,8 +7,8 @@ cd "$(dirname "$0")/.."
 if [[ "$SIGNING_IDENTITY" == "-" ]]; then echo "A Developer ID identity is required for distribution." >&2; exit 1; fi
 Scripts/check.sh
 Scripts/build.sh
-app="$PWD/dist/Photo Viewer.app"
-archive="$PWD/dist/PhotoViewer-notarization.zip"
+app="$PWD/dist/Glance.app"
+archive="$PWD/dist/Glance-notarization.zip"
 ditto -c -k --keepParent "$app" "$archive"
 xcrun notarytool submit "$archive" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$app"
@@ -16,6 +16,6 @@ xcrun stapler validate "$app"
 codesign --verify --deep --strict "$app"
 spctl --assess --type execute --verbose=2 "$app"
 rm -f "$archive"
-ditto -c -k --keepParent "$app" "$PWD/dist/PhotoViewer-1.0.0-macOS.zip"
-shasum -a 256 "$PWD/dist/PhotoViewer-1.0.0-macOS.zip" > "$PWD/dist/PhotoViewer-1.0.0-macOS.zip.sha256"
+ditto -c -k --keepParent "$app" "$PWD/dist/Glance-1.0.0-macOS.zip"
+shasum -a 256 "$PWD/dist/Glance-1.0.0-macOS.zip" > "$PWD/dist/Glance-1.0.0-macOS.zip.sha256"
 echo "Notarized release ready in dist/"

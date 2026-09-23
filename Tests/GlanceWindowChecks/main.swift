@@ -1,7 +1,7 @@
 import AppKit
 import QuartzCore
 import ImageIO
-import PhotoViewerCore
+import GlanceCore
 import Darwin
 
 // Exercise the real window controller without showing windows or synthesizing input.
@@ -46,7 +46,7 @@ viewer.canvas.zoom(1.5)
 let originalScale = viewer.canvas.viewport.scale
 var marker: UInt64 = 123
 let status = withUnsafeBytes(of: &marker) { bytes in
-    setxattr(first.path, "com.example.photoviewer.test", bytes.baseAddress, bytes.count, 0, 0)
+    setxattr(first.path, "rs.qubit.glance.test", bytes.baseAddress, bytes.count, 0, 0)
 }
 check(status == 0, "Update fixture metadata")
 RunLoop.main.run(until: Date().addingTimeInterval(0.8))

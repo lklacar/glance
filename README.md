@@ -1,14 +1,16 @@
-# Photo Viewer
+# Glance
 
 A small native macOS image viewer inspired by Eye of GNOME. Open an image, scroll to zoom, and use the left/right arrow keys to browse the other images in its folder. Navigation wraps at either end.
 
 Built with Swift, AppKit, Core Graphics, and Image I/O. No Electron, third-party runtime, network access, telemetry, or image-library installation is required.
 
+Bundle identifier and Swift package name: `rs.qubit.glance`.
+
 ## Run
 
 Requires **macOS 14 Sonoma or later**. The universal app runs on Apple Silicon and Intel.
 
-Open `dist/Photo Viewer.app`, or copy it to Applications. Drop an image or folder onto the window, use **⌘O**, or use Finder’s **Open With → Photo Viewer**. To make it the default for a format, select an image in Finder, choose **Get Info → Open with → Photo Viewer → Change All**. The app does not change your file associations itself.
+Open `dist/Glance.app`, or copy it to Applications. Drop an image or folder onto the window, use **⌘O**, or use Finder’s **Open With → Glance**. To make it the default for a format, select an image in Finder, choose **Get Info → Open with → Glance → Change All**. The app does not change your file associations itself.
 
 The local build is ad-hoc signed. A build intended for distribution to other Macs must be Developer ID signed and notarized; see [Release](#release).
 
@@ -58,7 +60,7 @@ Install Apple’s Command Line Tools (`xcode-select --install`) or Xcode, with S
 ```sh
 Scripts/check.sh
 Scripts/build.sh
-open "dist/Photo Viewer.app"
+open "dist/Glance.app"
 ```
 
 `Scripts/build.sh` builds both architectures, generates the app icon, packages metadata, and verifies the signature. For a faster development build:

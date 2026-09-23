@@ -42,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clear.target = self; menu.addItem(clear)
     }
     @objc func help(_ sender: Any?) {
-        let alert = NSAlert(); alert.messageText = "Photo Viewer shortcuts"
+        let alert = NSAlert(); alert.messageText = "Glance shortcuts"
         alert.informativeText = "← / →     Previous / next image (loops)\nScroll or pinch     Zoom around the pointer\nDrag     Pan a zoomed image\nOption + scroll     Pan\n0 / ⌘0     Fit to window\n1 / ⌘1     Actual pixels\n+ / −     Zoom in / out\nDouble-click     Fit / actual pixels\n⌘R     Rotate view clockwise\nSpace     Pause animation / toggle slideshow\n⇧⌘P     Toggle slideshow (5 seconds)\n⌃⌘F     Toggle full screen\nEscape     Stop slideshow / leave full screen\n⌘I     Image information\n⇧⌘R     Show in Finder\n⌘O     Open an image or folder\n\nImages are never modified. TIFF, PDF, PSD, and image collections show the first page or composite. Camera RAW support depends on macOS."
         alert.runModal()
     }
@@ -56,16 +56,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
             item.keyEquivalentModifierMask = modifiers; item.target = target; menu.addItem(item); return item
         }
-        let app = menu("Photo Viewer")
-        add(app, "About Photo Viewer", #selector(NSApplication.orderFrontStandardAboutPanel(_:)))
+        let app = menu("Glance")
+        add(app, "About Glance", #selector(NSApplication.orderFrontStandardAboutPanel(_:)))
         app.addItem(.separator())
         let services = NSMenu(title: "Services"), serviceItem = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
         serviceItem.submenu = services; app.addItem(serviceItem); NSApp.servicesMenu = services
         app.addItem(.separator())
-        add(app, "Hide Photo Viewer", #selector(NSApplication.hide(_:)), "h")
+        add(app, "Hide Glance", #selector(NSApplication.hide(_:)), "h")
         add(app, "Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option])
         add(app, "Show All", #selector(NSApplication.unhideAllApplications(_:)))
-        app.addItem(.separator()); add(app, "Quit Photo Viewer", #selector(NSApplication.terminate(_:)), "q")
+        app.addItem(.separator()); add(app, "Quit Glance", #selector(NSApplication.terminate(_:)), "q")
         let file = menu("File")
         add(file, "Open…", #selector(openDocument(_:)), "o", target: self)
         let recent = NSMenu(title: "Open Recent"); recent.delegate = self
@@ -92,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add(window, "Minimize", #selector(NSWindow.performMiniaturize(_:)), "m")
         add(window, "Zoom", #selector(NSWindow.performZoom(_:)))
         let helpMenu = menu("Help"); NSApp.helpMenu = helpMenu
-        add(helpMenu, "Photo Viewer Help", #selector(help(_:)), "?", target: self)
+        add(helpMenu, "Glance Help", #selector(help(_:)), "?", target: self)
         NSApp.mainMenu = main
     }
 }

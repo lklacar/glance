@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "PhotoViewer",
+    name: "rs.qubit.glance",
     platforms: [.macOS(.v14)],
-    products: [.executable(name: "PhotoViewer", targets: ["PhotoViewer"])],
+    products: [.executable(name: "Glance", targets: ["Glance"])],
     targets: [
-        .target(name: "PhotoViewerCore"),
-        .executableTarget(name: "PhotoViewer", dependencies: ["PhotoViewerCore"]),
-        .executableTarget(name: "PhotoViewerChecks", dependencies: ["PhotoViewerCore"], path: "Tests/PhotoViewerCoreTests")
+        .target(name: "GlanceCore"),
+        .executableTarget(name: "Glance", dependencies: ["GlanceCore"]),
+        .executableTarget(name: "GlanceChecks", dependencies: ["GlanceCore"], path: "Tests/GlanceCoreTests")
     ]
 )

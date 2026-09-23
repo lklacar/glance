@@ -34,7 +34,7 @@ Performed against the native window and release app using macOS UI automation:
 - Add an image to the active folder: the count changes from 4 to 5 without losing the selected image.
 - Remove/rename the current file: the viewer advances to the next image and updates the count.
 - Show in Finder selects the correct file.
-- Finder lists Photo Viewer under Open With, and opening a different WebP file there updates the viewer.
+- Finder lists Glance under Open With, and opening a different WebP file there updates the viewer.
 
 Panning geometry and animated timing/frame decoding are covered by automated checks. Full end-to-end drag-and-drop, trackpad pinch gestures, VoiceOver interaction, and long-duration slideshow/animation soak testing have not been certified.
 
@@ -80,3 +80,9 @@ All 24 core check groups and the window-controller checks pass locally. New chec
 The canvas now holds decoded pixels in a Core Animation layer. Zoom and pan update layer geometry; the transparency checkerboard path is built only when the canvas changes size. Offscreen layer rendering matches the previous image orientation in all four rotations. A sequence of 1,000 zoom updates preserved the image contents and checkerboard path without marking the canvas for repaint. CPU submission averaged approximately 0.002 ms per update on this Mac; this is not a GPU frame-time or visible-frame-rate measurement.
 
 Discrete wheel ticks and zoom buttons use a view-bound display link with a short time-based transition. Precise trackpad scrolling and pinch remain direct, scrolling momentum is accepted, and Reduce Motion bypasses transitions. Zoom updates only the percentage indicator instead of reformatting all image metadata. Physical trackpad behavior and sustained frame pacing on other hardware remain manual checks.
+
+## Glance rename
+
+Renamed the app, executable, Swift modules, menus, build/release artifacts, and documentation to Glance. The bundle identifier and Swift package name are `rs.qubit.glance`.
+
+All 24 core check groups and the window/controller rendering checks pass after the rename. The optimized universal app builds for Apple Silicon and Intel; metadata, icon, strict code-signature verification, and dependency checks pass. The local bundle remains ad-hoc signed.

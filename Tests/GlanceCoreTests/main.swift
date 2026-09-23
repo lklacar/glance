@@ -1,7 +1,7 @@
 import AppKit
 import Darwin
 import ImageIO
-import PhotoViewerCore
+import GlanceCore
 
 
 private var failures = 0
@@ -26,7 +26,7 @@ private func expectThrows<T>(_ expression: @autoclosure () throws -> T, file: St
     do { _ = try expression(); fail("expected error", file: file, line: line) } catch {}
 }
 
-final class PhotoViewerCoreTests {
+final class GlanceCoreTests {
     private var temporary: URL!
     func setUpWithError() throws {
         temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -246,7 +246,7 @@ final class PhotoViewerCoreTests {
         let cache = ImageCache(); cache.setPriority([url]); cache.insert(image, for: url, version: version)
         var marker: UInt64 = 123
         let status = withUnsafeBytes(of: &marker) { bytes in
-            setxattr(url.path, "com.example.photoviewer.test", bytes.baseAddress, bytes.count, 0, 0)
+            setxattr(url.path, "rs.qubit.glance.test", bytes.baseAddress, bytes.count, 0, 0)
         }
         expectEqual(status, 0)
         expectEqual(ImageFileVersion(url: url), version)
@@ -258,7 +258,7 @@ final class PhotoViewerCoreTests {
         let monitor = try unwrap(FileMonitor(url: url) { events += 1 })
         var marker: UInt64 = 123
         let status = withUnsafeBytes(of: &marker) { bytes in
-            setxattr(url.path, "com.example.photoviewer.test", bytes.baseAddress, bytes.count, 0, 0)
+            setxattr(url.path, "rs.qubit.glance.test", bytes.baseAddress, bytes.count, 0, 0)
         }
         expectEqual(status, 0)
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
@@ -336,7 +336,7 @@ final class PhotoViewerCoreTests {
     }
 }
 
-let suite = PhotoViewerCoreTests()
+let suite = GlanceCoreTests()
 do { try suite.setUpWithError(); try suite.testNaturalOrderFilteringAndNavigationWraps(); try suite.tearDownWithError(); print("Checked testNaturalOrderFilteringAndNavigationWraps") } catch { fail("testNaturalOrderFilteringAndNavigationWraps: \(error)") }
 do { try suite.setUpWithError(); suite.testEmptyAndSingleImageFolders(); try suite.tearDownWithError(); print("Checked testEmptyAndSingleImageFolders") } catch { fail("testEmptyAndSingleImageFolders: \(error)") }
 do { try suite.setUpWithError(); suite.testRefreshPreservesSelectionAndHandlesRemoval(); try suite.tearDownWithError(); print("Checked testRefreshPreservesSelectionAndHandlesRemoval") } catch { fail("testRefreshPreservesSelectionAndHandlesRemoval: \(error)") }

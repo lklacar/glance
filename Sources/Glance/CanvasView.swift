@@ -1,6 +1,6 @@
 import AppKit
 import QuartzCore
-import PhotoViewerCore
+import GlanceCore
 
 private final class ZoomDisplayLinkTarget: NSObject {
     weak var canvas: CanvasView?

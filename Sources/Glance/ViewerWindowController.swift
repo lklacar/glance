@@ -1,5 +1,5 @@
 import AppKit
-import PhotoViewerCore
+import GlanceCore
 
 final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSMenuItemValidation {
     let canvas = CanvasView(frame: .zero)
@@ -17,7 +17,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
     private let prefetchQueue = OperationQueue()
     private let imageCache = ImageCache()
     private var prefetchID = UUID()
-    private let scanQueue = DispatchQueue(label: "PhotoViewer.folder", qos: .userInitiated)
+    private let scanQueue = DispatchQueue(label: "rs.qubit.glance.folder", qos: .userInitiated)
     private var requestID = UUID()
     private var folderID = UUID()
     private var animationID = UUID()
@@ -36,9 +36,9 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         super.init(window: window)
-        window.title = "Photo Viewer"
+        window.title = "Glance"
         window.minSize = NSSize(width: 560, height: 380)
-        window.setFrameAutosaveName("PhotoViewer.MainWindow")
+        window.setFrameAutosaveName("rs.qubit.glance.MainWindow")
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = NSColor(calibratedWhite: 0.075, alpha: 1)
         window.titlebarAppearsTransparent = true
@@ -46,9 +46,9 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         window.collectionBehavior.insert(.fullScreenPrimary)
         window.isReleasedWhenClosed = false
         window.delegate = self
-        decodeQueue.name = "PhotoViewer.decoder"; decodeQueue.maxConcurrentOperationCount = 1
+        decodeQueue.name = "rs.qubit.glance.decoder"; decodeQueue.maxConcurrentOperationCount = 1
         decodeQueue.qualityOfService = .userInitiated
-        prefetchQueue.name = "PhotoViewer.prefetch"; prefetchQueue.maxConcurrentOperationCount = 1
+        prefetchQueue.name = "rs.qubit.glance.prefetch"; prefetchQueue.maxConcurrentOperationCount = 1
         prefetchQueue.qualityOfService = .utility
         buildContent()
         let toolbar = NSToolbar(identifier: "ViewerToolbar")
@@ -65,7 +65,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
             stopSlideshow()
             if window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
         }
-        if !window.setFrameUsingName("PhotoViewer.MainWindow") { window.center() }
+        if !window.setFrameUsingName("rs.qubit.glance.MainWindow") { window.center() }
         updateStatus()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -198,7 +198,7 @@ final class ViewerWindowController: NSWindowController, NSWindowDelegate, NSTool
         loadingURL = nil; currentVersion = nil
         imageCache.setPriority(catalog.nearbyURLs())
         guard let url = catalog.current else {
-            stopSlideshow(); window?.title = "Photo Viewer"; window?.representedURL = nil
+            stopSlideshow(); window?.title = "Glance"; window?.representedURL = nil
             canvas.showMessage("No images in this folder", detail: "Open another image or folder with ⌘O")
             updateStatus(); return
         }
