@@ -14,6 +14,12 @@ Open `dist/Glance.app`, or copy it to Applications. Drop an image or folder onto
 
 The local build is ad-hoc signed. A build intended for distribution to other Macs must be Developer ID signed and notarized; see [Release](#release).
 
+### Finder warns that an image cannot be verified
+
+For a default viewer, use **Get Info → Open with → Glance → Change All** for each image format. Setting **Always Open With** for an individual downloaded file can trigger a macOS security warning against the document itself. Apple documents this interaction between a quarantined file and its per-file app override [in this developer support discussion](https://developer.apple.com/forums/thread/795994).
+
+If a file already has that override, remove its per-file association and use the format-wide default instead. Opening the image through Glance's **File → Open** is another workaround. Changing the association does not require removing download quarantine or disabling Gatekeeper.
+
 ## Controls
 
 | Action | Control |

@@ -86,3 +86,7 @@ Discrete wheel ticks and zoom buttons use a view-bound display link with a short
 Renamed the app, executable, Swift modules, menus, build/release artifacts, and documentation to Glance. The bundle identifier and Swift package name are `rs.qubit.glance`.
 
 All 24 core check groups and the window/controller rendering checks pass after the rename. The optimized universal app builds for Apple Silicon and Intel; metadata, icon, strict code-signature verification, and dependency checks pass. The local bundle remains ad-hoc signed.
+
+## Finder default-opening repair
+
+The affected downloaded JPEG had both `com.apple.quarantine` and a `com.apple.LaunchServices.OpenWith` override pointing to `/Applications/Glance.app`; the format-wide JPEG default was still Preview. This matches Apple's documented quarantined-document/per-file-binding warning. Set the JPEG default to `rs.qubit.glance` and removed only that file's Open With override. Opening through the system default then displayed the affected 5911 × 3941 image in Glance, verified through the native window's accessibility state. The quarantine attribute was preserved. This required no app-code or signing change.
