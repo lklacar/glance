@@ -1,0 +1,23 @@
+name: macOS build and checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Regression checks
+        run: Scripts/check.sh
+      - name: Universal release build
+        run: Scripts/build.sh
+      - name: Verify bundle
+        run: Scripts/verify-bundle.sh
+      - name: Package local build
+        run: ditto -c -k --keepParent "dist/Photo Viewer.app" dist/PhotoViewer-macOS-local.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PhotoViewer-macOS-local
+          path: dist/PhotoViewer-macOS-local.zip
